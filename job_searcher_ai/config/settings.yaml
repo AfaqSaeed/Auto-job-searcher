@@ -1,0 +1,103 @@
+search:
+  locations:
+    - Berlin
+    - Munich
+    - Hamburg
+    - Remote
+  job_titles:
+    - Computer Vision Engineer
+    - Perception Engineer
+    - Research Engineer, Multimodal AI
+    - 3D Vision Engineer
+    - Mapping and Localization Engineer
+  include_keywords:
+    - computer vision
+    - multimodal perception
+    - visual perception
+    - slam
+    - sensor fusion
+    - edge deployment
+  exclude_keywords:
+    - account executive
+    - sales
+    - recruiter
+    - hr
+  preferred_industries:
+    - autonomous driving
+    - robotics
+    - automotive
+    - industrial ai
+  target_countries:
+    - Germany
+    - Netherlands
+    - United Kingdom
+  remote_preference: hybrid
+  experience_level: senior
+  query_limit: 40
+  english_first: true
+  include_german_variants: true
+
+criteria:
+  locations:
+    - Berlin
+    - Munich
+    - Remote
+  remote_preference: hybrid
+  visa_constraints:
+    - needs visa sponsorship review
+  minimum_salary: 80000
+  target_titles:
+    - Perception Engineer
+    - Computer Vision Engineer
+    - ML Engineer, Vision
+    - Research Engineer, Multimodal AI
+  blacklist_companies: []
+  preferred_industries:
+    - robotics
+    - autonomous driving
+    - mapping
+  seniority_range:
+    - mid
+    - senior
+    - staff
+
+ollama:
+  enabled: true
+  host: http://localhost:11434
+  model: llama3.1:8b
+  temperature: 0.2
+  timeout_seconds: 120
+
+embeddings:
+  enabled: false
+  model_name: BAAI/bge-small-en-v1.5
+
+scraping:
+  request_timeout_seconds: 20
+  rate_limit_seconds: 1.0
+  max_retries: 3
+  cache_ttl_hours: 24
+  respect_robots: true
+  user_agent: job_searcher_ai/0.1 (+personal job research)
+
+sources:
+  toggles:
+    greenhouse: true
+    lever: true
+    static_pages: false
+    rss: false
+    manual_import: true
+  greenhouse_boards:
+    - wayve
+    - ambi-robotics
+  lever_boards:
+    - openai
+  static_pages: []
+  rss_feeds: []
+  manual_files:
+    - data/manual_jobs.json
+
+outputs:
+  directory: outputs
+  cache_directory: .cache
+  top_n_markdown: 20

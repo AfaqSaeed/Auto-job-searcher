@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "job-searcher-ai"
+version = "0.1.0"
+description = "Production-minded local-AI job search assistant for personal job hunting."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "OpenAI Codex" }]
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "pydantic>=2.8",
+  "PyYAML>=6.0",
+  "requests>=2.32",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+embeddings = [
+  "sentence-transformers>=2.7",
+]
+ui = [
+  "streamlit>=1.40",
+]
+browser = [
+  "playwright>=1.48",
+]
+
+[project.scripts]
+job-searcher = "job_searcher.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

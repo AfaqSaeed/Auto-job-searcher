@@ -1,0 +1,19 @@
+[
+  {
+    "id": "manual-vision-1",
+    "source": "manual_import",
+    "source_url": "https://example.com/jobs/perception-engineer",
+    "title": "Perception Engineer",
+    "company": "Example Robotics",
+    "location": "Berlin, Germany",
+    "work_mode": "hybrid",
+    "description": "Build multimodal perception, sensor fusion, and computer vision systems for robotics.",
+    "required_skills": ["python", "pytorch", "computer vision", "sensor fusion"],
+    "preferred_skills": ["slam", "3d vision"],
+    "responsibilities": ["ship perception models", "improve robotics perception"],
+    "minimum_qualifications": ["industry experience with vision systems"],
+    "domain_signals": ["robotics", "multimodal perception"],
+    "application_url": "https://example.com/jobs/perception-engineer/apply",
+    "date_posted": "2026-04-01"
+  }
+]
