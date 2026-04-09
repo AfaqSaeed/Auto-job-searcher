@@ -32,6 +32,7 @@ class SourceRunResult:
     source_name: str
     jobs: list[JobListing] = field(default_factory=list)
     filtered_out_jobs: list[JobListing] = field(default_factory=list)
+    discovered_jobs: list[JobListing] = field(default_factory=list)
     raw_jobs: int = 0
     matched_jobs: int = 0
     diagnostics: list[RequestDiagnostic] = field(default_factory=list)
@@ -86,6 +87,18 @@ class SourceRunResult:
             "filtered_out_count": len(self.filtered_out_jobs),
             "summary": self.summary(),
             "filtered_out_jobs": [job.model_dump(mode="json") for job in self.filtered_out_jobs],
+        }
+
+    def discovered_debug_payload(self) -> dict:
+        """Return a compact debug payload for jobs discovered before query filtering."""
+
+        return {
+            "source_name": self.source_name,
+            "raw_jobs": self.raw_jobs,
+            "matched_jobs": self.matched_jobs,
+            "filtered_out_count": len(self.filtered_out_jobs),
+            "summary": self.summary(),
+            "discovered_jobs": [job.model_dump(mode="json") for job in self.discovered_jobs],
         }
 
 

@@ -79,6 +79,7 @@ class JobSearcherPipeline:
         deduped = self._dedupe_jobs(jobs)
         write_json_output([job.model_dump(mode='json') for job in deduped], self.artifacts.discovered_jobs_json)
         self._write_filtered_jobs_debug()
+        self._write_custom_career_pages_debug()
         return deduped
 
     def load_jobs(self) -> list[JobListing]:
@@ -121,6 +122,7 @@ class JobSearcherPipeline:
             top_jobs=active_ranked_jobs[: self.config.outputs.top_n_markdown],
             notes=source_notes + [
                 f'Filtered-out jobs debug file: {self.artifacts.filtered_jobs_debug_json.name}',
+                f'Custom career page debug file: {self.artifacts.custom_career_pages_debug_json.name}',
                 'LLM reasoning is optional and falls back to heuristics when Ollama is unavailable.',
                 'Embeddings are disabled by default and require the embeddings extra.',
             ],
@@ -143,6 +145,14 @@ class JobSearcherPipeline:
     def _write_filtered_jobs_debug(self) -> None:
         payload = [run.filtered_debug_payload() for run in self.last_source_runs if run.filtered_out_jobs]
         write_json_output(payload, self.artifacts.filtered_jobs_debug_json)
+
+    def _write_custom_career_pages_debug(self) -> None:
+        payload = [
+            run.discovered_debug_payload()
+            for run in self.last_source_runs
+            if run.source_name == 'custom_career_pages' and run.discovered_jobs
+        ]
+        write_json_output(payload, self.artifacts.custom_career_pages_debug_json)
 
     @staticmethod
     def _dedupe_jobs(jobs: list[JobListing]) -> list[JobListing]:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from job_searcher.config import AppConfig
 from job_searcher.sources.base import BaseJobSource
+from job_searcher.sources.custom_career_pages import CustomCareerPagesSource
 from job_searcher.sources.greenhouse import GreenhouseSource
 from job_searcher.sources.lever import LeverSource
 from job_searcher.sources.manual_import import ManualImportSource
@@ -22,6 +23,8 @@ def build_enabled_sources(config: AppConfig, project_root: Path) -> list[BaseJob
         sources.append(LeverSource())
     if toggles.static_pages:
         sources.append(StaticCompanyPagesSource(project_root))
+    if toggles.custom_career_pages:
+        sources.append(CustomCareerPagesSource())
     if toggles.rss:
         sources.append(RSSSource())
     if toggles.manual_import:

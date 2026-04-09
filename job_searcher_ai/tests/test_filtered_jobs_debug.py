@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from job_searcher.config import load_config
 from job_searcher.models import PipelineArtifacts
@@ -11,6 +11,7 @@ def test_pipeline_artifacts_include_filtered_jobs_debug() -> None:
     artifacts = PipelineArtifacts.from_root(Path.cwd(), config.outputs.directory, config.outputs.cache_directory)
 
     assert artifacts.filtered_jobs_debug_json.name == 'filtered_jobs_debug.json'
+    assert artifacts.custom_career_pages_debug_json.name == 'custom_career_pages_debug.json'
 
 
 def test_source_run_result_debug_payload_includes_filtered_jobs() -> None:
@@ -27,9 +28,11 @@ def test_source_run_result_debug_payload_includes_filtered_jobs() -> None:
         minimum_qualifications=[],
         domain_signals=[],
     )
-    run = SourceRunResult(source_name='manual_import', raw_jobs=1, matched_jobs=0, filtered_out_jobs=[job])
+    run = SourceRunResult(source_name='manual_import', raw_jobs=1, matched_jobs=0, filtered_out_jobs=[job], discovered_jobs=[job])
 
     payload = run.filtered_debug_payload()
+    discovered_payload = run.discovered_debug_payload()
 
     assert payload['filtered_out_count'] == 1
     assert payload['filtered_out_jobs'][0]['title'] == 'Data Scientist'
+    assert discovered_payload['discovered_jobs'][0]['title'] == 'Data Scientist'

@@ -107,7 +107,7 @@ def parse_lever_job(payload: dict) -> JobListing:
     )
 
 
-def parse_static_job_page(url: str, html: str, company: str | None = None) -> JobListing:
+def parse_static_job_page(url: str, html: str, company: str | None = None, source: str = "static_company_pages") -> JobListing:
     soup = BeautifulSoup(html or "", "html.parser")
     title = (soup.find("h1") or soup.find("title") or soup.find("h2"))
     title_text = title.get_text(" ", strip=True) if title else "Unknown title"
@@ -118,7 +118,7 @@ def parse_static_job_page(url: str, html: str, company: str | None = None) -> Jo
     return normalize_job_listing(
         JobListing(
             id=url,
-            source="static_company_pages",
+            source=source,
             source_url=url,
             title=title_text,
             company=company or join_url(url, "/").split("//")[-1].split("/")[0],

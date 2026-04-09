@@ -63,6 +63,7 @@ class SourceToggles(BaseModel):
     static_pages: bool = False
     rss: bool = False
     manual_import: bool = True
+    custom_career_pages: bool = False
 
 
 class StaticPageConfig(BaseModel):
@@ -75,11 +76,23 @@ class StaticPageConfig(BaseModel):
     company: str | None = None
 
 
+class CustomCareerPageConfig(BaseModel):
+    name: str
+    url: str
+    company: str | None = None
+    include_url_patterns: list[str] = Field(default_factory=list)
+    exclude_url_patterns: list[str] = Field(default_factory=list)
+    seed_urls: list[str] = Field(default_factory=list)
+    max_pages: int = 150
+    sitemap_paths: list[str] = Field(default_factory=lambda: ["/sitemap.xml", "/sitemap_index.xml"])
+
+
 class SourcesSettings(BaseModel):
     toggles: SourceToggles = Field(default_factory=SourceToggles)
     greenhouse_boards: list[str] = Field(default_factory=list)
     lever_boards: list[str] = Field(default_factory=list)
     static_pages: list[StaticPageConfig] = Field(default_factory=list)
+    custom_career_pages: list[CustomCareerPageConfig] = Field(default_factory=list)
     rss_feeds: list[str] = Field(default_factory=list)
     manual_files: list[str] = Field(default_factory=list)
 

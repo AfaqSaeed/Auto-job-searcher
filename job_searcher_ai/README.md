@@ -16,7 +16,7 @@ The v1 design is intentionally local-first:
 - Deterministic skill, domain, role, and industry extraction
 - Optional Ollama-based summarization and fit explanations
 - Search query generation with adjacent-role expansion
-- Public source connectors for Greenhouse, Lever, RSS, static pages, and manual imports
+- Public source connectors for Greenhouse, Lever, RSS, static pages, custom career pages, and manual imports
 - Hybrid ranking with symbolic scoring, optional embeddings, and qualitative reasoning
 - CSV, JSON, and Markdown outputs
 - Cache layer for repeated fetches
@@ -122,6 +122,8 @@ The pipeline writes:
 - `outputs/profile_structured.json`
 - `outputs/search_queries.json`
 - `outputs/discovered_jobs.json`
+- `outputs/filtered_jobs_debug.json`
+- `outputs/custom_career_pages_debug.json`
 - `outputs/jobs_ranked.json`
 - `outputs/jobs_ranked.csv`
 - `outputs/top_matches.md`
@@ -143,14 +145,36 @@ Each ranked result includes:
 - Lever postings API
 - RSS feeds
 - Static company pages with configurable selectors
+- Custom career pages with same-domain crawling and sitemap fallback
 - Manual imports from local JSON and CSV
 
 The connectors are pluggable and can be extended without touching the ranking pipeline.
 
+## Custom career pages
+
+Enable the source in `config/settings.yaml` and add one or more entries under `sources.custom_career_pages`.
+
+```yaml
+sources:
+  toggles:
+    custom_career_pages: true
+  custom_career_pages:
+    - name: KUKA Vacancies
+      company: KUKA
+      url: https://www.kuka.com/en-de/company/careers/vacancies
+      include_url_patterns:
+        - /company/careers/
+        - /vacancies/
+      max_pages: 200
+```
+
+The connector saves everything it discovered to `outputs/custom_career_pages_debug.json`, so you can inspect the parsed jobs before relying on ranking. Any discovered roles that also match your generated queries automatically flow into `outputs/discovered_jobs.json`, `outputs/jobs_ranked.json`, and `outputs/jobs_ranked.csv`.
+
 ## Limitations
 
 - Source coverage depends on configured boards, feeds, and manual inputs.
-- Generic static-page parsing is best-effort and may need page-specific selectors.
+- Generic static-page parsing is best-effort and may need page-specific selectors or URL patterns.
+- Some career pages render jobs client-side and may require sitemap discovery, direct job-detail URLs, or a future page-specific connector.
 - Ollama reasoning degrades gracefully when a local model is unavailable, but explanations become heuristic.
 - Embedding similarity is optional and requires a local sentence-transformers install.
 - v1 does not auto-submit applications.
