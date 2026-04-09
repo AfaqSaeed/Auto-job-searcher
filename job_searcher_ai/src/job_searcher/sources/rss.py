@@ -1,4 +1,4 @@
-"""RSS job source connector."""
+﻿"""RSS job source connector."""
 
 from __future__ import annotations
 
@@ -54,6 +54,8 @@ class RSSSource(BaseJobSource):
                 if self.matches_queries(job, queries):
                     result.jobs.append(job)
                     result.matched_jobs += 1
+                else:
+                    result.filtered_out_jobs.append(job)
 
         result.diagnostics = context.take_diagnostics()
         return result

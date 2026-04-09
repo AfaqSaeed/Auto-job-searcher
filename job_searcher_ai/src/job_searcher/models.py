@@ -111,6 +111,7 @@ class PipelineArtifacts(BaseModel):
     profile_structured_json: Path
     search_queries_json: Path
     discovered_jobs_json: Path
+    filtered_jobs_debug_json: Path
     jobs_ranked_json: Path
     jobs_ranked_csv: Path
     top_matches_md: Path
@@ -128,6 +129,7 @@ class PipelineArtifacts(BaseModel):
             profile_structured_json=output_path / "profile_structured.json",
             search_queries_json=output_path / "search_queries.json",
             discovered_jobs_json=output_path / "discovered_jobs.json",
+            filtered_jobs_debug_json=output_path / "filtered_jobs_debug.json",
             jobs_ranked_json=output_path / "jobs_ranked.json",
             jobs_ranked_csv=output_path / "jobs_ranked.csv",
             top_matches_md=output_path / "top_matches.md",

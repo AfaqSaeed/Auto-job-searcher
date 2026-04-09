@@ -1,4 +1,4 @@
-"""Manual job import connector."""
+﻿"""Manual job import connector."""
 
 from __future__ import annotations
 
@@ -38,20 +38,23 @@ class ManualImportSource(BaseJobSource):
                 continue
             result.raw_jobs += loaded[0]
             result.jobs.extend(loaded[1])
+            result.filtered_out_jobs.extend(loaded[2])
             result.matched_jobs += len(loaded[1])
 
         result.diagnostics = context.take_diagnostics()
         return result
 
-    def _load_json(self, path: Path, queries: list[SearchQuery]) -> tuple[int, list[JobListing]]:
+    def _load_json(self, path: Path, queries: list[SearchQuery]) -> tuple[int, list[JobListing], list[JobListing]]:
         payload = json.loads(path.read_text(encoding="utf-8"))
         records = payload if isinstance(payload, list) else [payload]
         jobs = [normalize_job_listing(JobListing.model_validate(record)) for record in records]
         matched = [job for job in jobs if self.matches_queries(job, queries)]
-        return len(jobs), matched
+        filtered_out = [job for job in jobs if not self.matches_queries(job, queries)]
+        return len(jobs), matched, filtered_out
 
-    def _load_csv(self, path: Path, queries: list[SearchQuery]) -> tuple[int, list[JobListing]]:
-        jobs: list[JobListing] = []
+    def _load_csv(self, path: Path, queries: list[SearchQuery]) -> tuple[int, list[JobListing], list[JobListing]]:
+        matched_jobs: list[JobListing] = []
+        filtered_out_jobs: list[JobListing] = []
         raw_count = 0
         with path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -76,8 +79,10 @@ class ManualImportSource(BaseJobSource):
                 }
                 job = normalize_job_listing(JobListing.model_validate(record))
                 if self.matches_queries(job, queries):
-                    jobs.append(job)
-        return raw_count, jobs
+                    matched_jobs.append(job)
+                else:
+                    filtered_out_jobs.append(job)
+        return raw_count, matched_jobs, filtered_out_jobs
 
 
 def _split_pipe(value: str | None) -> list[str]:

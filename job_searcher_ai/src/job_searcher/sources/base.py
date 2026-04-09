@@ -1,4 +1,4 @@
-"""Source abstractions and shared HTTP helpers."""
+﻿"""Source abstractions and shared HTTP helpers."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ class RequestDiagnostic:
 class SourceRunResult:
     source_name: str
     jobs: list[JobListing] = field(default_factory=list)
+    filtered_out_jobs: list[JobListing] = field(default_factory=list)
     raw_jobs: int = 0
     matched_jobs: int = 0
     diagnostics: list[RequestDiagnostic] = field(default_factory=list)
@@ -40,7 +41,7 @@ class SourceRunResult:
         """Build a concise source result summary for logs and reports."""
 
         if self.matched_jobs > 0:
-            filtered_out = max(0, self.raw_jobs - self.matched_jobs)
+            filtered_out = len(self.filtered_out_jobs)
             if filtered_out > 0:
                 return (
                     f"Fetched {self.matched_jobs} jobs from {self.source_name} "
@@ -74,6 +75,18 @@ class SourceRunResult:
             return f"Fetched 0 jobs from {self.source_name}: {self.notes[0]}"
 
         return f"Fetched 0 jobs from {self.source_name}: source returned no jobs or no source entries were configured"
+
+    def filtered_debug_payload(self) -> dict:
+        """Return a compact debug payload for filtered-out jobs."""
+
+        return {
+            "source_name": self.source_name,
+            "raw_jobs": self.raw_jobs,
+            "matched_jobs": self.matched_jobs,
+            "filtered_out_count": len(self.filtered_out_jobs),
+            "summary": self.summary(),
+            "filtered_out_jobs": [job.model_dump(mode="json") for job in self.filtered_out_jobs],
+        }
 
 
 @dataclass
