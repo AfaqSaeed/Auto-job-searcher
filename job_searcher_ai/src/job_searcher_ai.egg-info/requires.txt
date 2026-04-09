@@ -1,0 +1,16 @@
+beautifulsoup4>=4.12
+pydantic>=2.8
+PyYAML>=6.0
+requests>=2.32
+
+[browser]
+playwright>=1.48
+
+[dev]
+pytest>=8.0
+
+[embeddings]
+sentence-transformers>=2.7
+
+[ui]
+streamlit>=1.40
