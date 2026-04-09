@@ -55,7 +55,7 @@ def read_profile_document(main_profile: Path, supplemental_files: list[Path] | N
     source_files: list[str] = []
     sections: list[DocumentSection] = []
     for path in files:
-        content = path.read_text(encoding="utf-8")
+        content = path.read_text(encoding="utf-8-sig")
         chunks.append(content)
         source_files.append(str(path))
         sections.extend(split_markdown_sections(content))

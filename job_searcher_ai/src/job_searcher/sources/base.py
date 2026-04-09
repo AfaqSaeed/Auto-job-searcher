@@ -1,4 +1,4 @@
-﻿"""Source abstractions and shared HTTP helpers."""
+"""Source abstractions and shared HTTP helpers."""
 
 from __future__ import annotations
 
@@ -20,24 +20,99 @@ LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
+class RequestDiagnostic:
+    url: str
+    status_code: int | None = None
+    message: str = ""
+    kind: str = "request_error"
+
+
+@dataclass
+class SourceRunResult:
+    source_name: str
+    jobs: list[JobListing] = field(default_factory=list)
+    raw_jobs: int = 0
+    matched_jobs: int = 0
+    diagnostics: list[RequestDiagnostic] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        """Build a concise source result summary for logs and reports."""
+
+        if self.matched_jobs > 0:
+            filtered_out = max(0, self.raw_jobs - self.matched_jobs)
+            if filtered_out > 0:
+                return (
+                    f"Fetched {self.matched_jobs} jobs from {self.source_name} "
+                    f"({self.raw_jobs} raw jobs, filtered out {filtered_out} by queries)"
+                )
+            return f"Fetched {self.matched_jobs} jobs from {self.source_name}"
+
+        if self.raw_jobs > 0 and self.matched_jobs == 0:
+            return (
+                f"Fetched 0 jobs from {self.source_name}: got {self.raw_jobs} raw jobs, "
+                "but all were filtered out by the generated queries"
+            )
+
+        if self.diagnostics:
+            primary = self.diagnostics[0]
+            if primary.status_code == 404:
+                return (
+                    f"Fetched 0 jobs from {self.source_name}: endpoint returned 404, "
+                    "which usually means a wrong board slug or the company is not using that ATS"
+                )
+            if primary.status_code == 403:
+                return f"Fetched 0 jobs from {self.source_name}: endpoint returned 403 and blocked access"
+            if primary.status_code == 429:
+                return f"Fetched 0 jobs from {self.source_name}: endpoint rate-limited the requests with 429"
+            if primary.kind == "robots_blocked":
+                return f"Fetched 0 jobs from {self.source_name}: robots.txt disallowed fetching this source"
+            if primary.kind == "request_error":
+                return f"Fetched 0 jobs from {self.source_name}: request failed ({primary.message})"
+
+        if self.notes:
+            return f"Fetched 0 jobs from {self.source_name}: {self.notes[0]}"
+
+        return f"Fetched 0 jobs from {self.source_name}: source returned no jobs or no source entries were configured"
+
+
+@dataclass
 class SourceContext:
     config: AppConfig
     cache: JsonCache
     session: requests.Session = field(default_factory=requests.Session)
     _last_request_at: float = 0.0
+    active_source: str = "unknown"
+    request_diagnostics: list[RequestDiagnostic] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.session.headers.update({"User-Agent": self.config.scraping.user_agent})
 
-    def get_json(self, url: str) -> dict:
+    def set_active_source(self, source_name: str) -> None:
+        self.active_source = source_name
+        self.request_diagnostics = []
+
+    def take_diagnostics(self) -> list[RequestDiagnostic]:
+        diagnostics = list(self.request_diagnostics)
+        self.request_diagnostics = []
+        return diagnostics
+
+    def add_note_diagnostic(self, *, url: str, message: str, kind: str, status_code: int | None = None) -> None:
+        self.request_diagnostics.append(
+            RequestDiagnostic(url=url, status_code=status_code, message=message, kind=kind)
+        )
+
+    def get_json(self, url: str) -> dict | list:
         payload = self._request(url, expect_json=True)
-        return payload if isinstance(payload, dict) else {}
+        if isinstance(payload, (dict, list)):
+            return payload
+        return {}
 
     def get_text(self, url: str) -> str:
         payload = self._request(url, expect_json=False)
         return payload if isinstance(payload, str) else ""
 
-    def _request(self, url: str, expect_json: bool) -> dict | str:
+    def _request(self, url: str, expect_json: bool) -> dict | list | str:
         cache_key = f"{'json' if expect_json else 'text'}::{url}"
         cached = self.cache.get(cache_key, ttl_hours=self.config.scraping.cache_ttl_hours)
         if cached is not None:
@@ -45,7 +120,9 @@ class SourceContext:
 
         if self.config.scraping.respect_robots and url.startswith("http"):
             if not is_allowed_by_robots(url, self.config.scraping.user_agent, timeout=self.config.scraping.request_timeout_seconds):
+                message = "robots.txt disallows this fetch"
                 LOGGER.warning("Skipping %s because robots.txt disallows it", url)
+                self.add_note_diagnostic(url=url, message=message, kind="robots_blocked")
                 return {} if expect_json else ""
 
         elapsed = time.monotonic() - self._last_request_at
@@ -61,8 +138,15 @@ class SourceContext:
                 data = response.json() if expect_json else response.text
                 self.cache.set(cache_key, data)
                 return data
+            except requests.HTTPError as exc:
+                last_error = exc
+                status_code = exc.response.status_code if exc.response is not None else None
+                self.add_note_diagnostic(url=url, status_code=status_code, message=str(exc), kind="http_error")
+                sleep_seconds = min(2 ** attempt, 5)
+                time.sleep(sleep_seconds)
             except requests.RequestException as exc:
                 last_error = exc
+                self.add_note_diagnostic(url=url, message=str(exc), kind="request_error")
                 sleep_seconds = min(2 ** attempt, 5)
                 time.sleep(sleep_seconds)
         LOGGER.warning("Failed to fetch %s: %s", url, last_error)
@@ -73,7 +157,7 @@ class BaseJobSource(ABC):
     name: str
 
     @abstractmethod
-    def fetch_jobs(self, queries: list[SearchQuery], context: SourceContext) -> list[JobListing]:
+    def fetch_jobs(self, queries: list[SearchQuery], context: SourceContext) -> SourceRunResult:
         """Fetch jobs for this source."""
 
     @staticmethod

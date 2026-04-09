@@ -1,4 +1,4 @@
-﻿"""Pipeline orchestration."""
+"""Pipeline orchestration."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from job_searcher.reporting.json_export import write_json_output
 from job_searcher.reporting.markdown_report import build_search_report_markdown, build_top_matches_markdown
 from job_searcher.schemas import JobListing, RankedJob, SearchQuery, SearchReport, UserProfile
 from job_searcher.sources import build_enabled_sources
-from job_searcher.sources.base import SourceContext
+from job_searcher.sources.base import SourceContext, SourceRunResult
 from job_searcher.utils.cache import JsonCache
 
 
@@ -38,27 +38,28 @@ class JobSearcherPipeline:
             self.config.outputs.directory,
             self.config.outputs.cache_directory,
         )
-        self.logger = setup_logging(log_file=self.artifacts.output_dir / "job_searcher.log")
+        self.logger = setup_logging(log_file=self.artifacts.output_dir / 'job_searcher.log')
         self.cache = JsonCache(self.artifacts.cache_dir)
         self.llm_client = OllamaClient(self.config.ollama) if self.config.ollama.enabled else None
+        self.last_source_runs: list[SourceRunResult] = []
 
     def ingest_profile(self, input_path: Path, supplemental_files: list[Path] | None = None) -> UserProfile:
         document = read_profile_document(self._resolve_path(input_path), [self._resolve_path(path) for path in supplemental_files or []])
         extracted = extract_profile(document)
         profile = apply_insights(extracted, summarize_profile(extracted, self.llm_client))
-        write_json_output(document.model_dump(mode="json"), self.artifacts.profile_document_json)
-        write_json_output(profile.model_dump(mode="json"), self.artifacts.profile_structured_json)
-        self.logger.info("Profile ingested: %s experiences, %s projects", len(profile.work_experience), len(profile.projects))
+        write_json_output(document.model_dump(mode='json'), self.artifacts.profile_document_json)
+        write_json_output(profile.model_dump(mode='json'), self.artifacts.profile_structured_json)
+        self.logger.info('Profile ingested: %s experiences, %s projects', len(profile.work_experience), len(profile.projects))
         return profile
 
     def load_profile(self) -> UserProfile:
-        return UserProfile.model_validate_json(self.artifacts.profile_structured_json.read_text(encoding="utf-8"))
+        return UserProfile.model_validate_json(self.artifacts.profile_structured_json.read_text(encoding='utf-8'))
 
     def generate_queries(self, profile: UserProfile | None = None) -> list[SearchQuery]:
         active_profile = profile or self.load_profile()
         queries = generate_search_queries(active_profile, self.config)
-        write_json_output([query.model_dump(mode="json") for query in queries], self.artifacts.search_queries_json)
-        self.logger.info("Generated %s search queries", len(queries))
+        write_json_output([query.model_dump(mode='json') for query in queries], self.artifacts.search_queries_json)
+        self.logger.info('Generated %s search queries', len(queries))
         return queries
 
     def load_queries(self) -> list[SearchQuery]:
@@ -69,12 +70,14 @@ class JobSearcherPipeline:
         active_queries = queries or self.load_queries()
         context = SourceContext(config=self.config, cache=self.cache)
         jobs: list[JobListing] = []
+        self.last_source_runs = []
         for source in build_enabled_sources(self.config, self.project_root):
-            source_jobs = source.fetch_jobs(active_queries, context)
-            self.logger.info("Fetched %s jobs from %s", len(source_jobs), source.name)
-            jobs.extend(source_jobs)
+            run = source.fetch_jobs(active_queries, context)
+            self.last_source_runs.append(run)
+            self.logger.info(run.summary())
+            jobs.extend(run.jobs)
         deduped = self._dedupe_jobs(jobs)
-        write_json_output([job.model_dump(mode="json") for job in deduped], self.artifacts.discovered_jobs_json)
+        write_json_output([job.model_dump(mode='json') for job in deduped], self.artifacts.discovered_jobs_json)
         return deduped
 
     def load_jobs(self) -> list[JobListing]:
@@ -85,13 +88,13 @@ class JobSearcherPipeline:
         active_profile = profile or self.load_profile()
         active_jobs = jobs or self.load_jobs()
         ranked_jobs = fuse_ranked_jobs(active_profile, active_jobs, self.config, client=self.llm_client)
-        write_json_output([item.model_dump(mode="json") for item in ranked_jobs], self.artifacts.jobs_ranked_json)
+        write_json_output([item.model_dump(mode='json') for item in ranked_jobs], self.artifacts.jobs_ranked_json)
         export_ranked_jobs_csv(ranked_jobs, self.artifacts.jobs_ranked_csv)
         self.artifacts.top_matches_md.write_text(
             build_top_matches_markdown(ranked_jobs, self.config.outputs.top_n_markdown),
-            encoding="utf-8",
+            encoding='utf-8',
         )
-        self.logger.info("Ranked %s jobs", len(ranked_jobs))
+        self.logger.info('Ranked %s jobs', len(ranked_jobs))
         return ranked_jobs
 
     def load_ranked_jobs(self) -> list[RankedJob]:
@@ -107,21 +110,22 @@ class JobSearcherPipeline:
         active_profile = profile or self.load_profile()
         active_queries = queries or self.load_queries()
         active_ranked_jobs = ranked_jobs or self.load_ranked_jobs()
+        source_notes = [run.summary() for run in self.last_source_runs] if self.last_source_runs else []
         report = SearchReport(
-            profile_summary=active_profile.summary or active_profile.llm_summary or "",
+            profile_summary=active_profile.summary or active_profile.llm_summary or '',
             sources_searched=[source.name for source in build_enabled_sources(self.config, self.project_root)],
             queries=active_queries,
             total_jobs_discovered=len(self.load_jobs()) if self.artifacts.discovered_jobs_json.exists() else len(active_ranked_jobs),
             total_jobs_ranked=len(active_ranked_jobs),
             top_jobs=active_ranked_jobs[: self.config.outputs.top_n_markdown],
-            notes=[
-                "LLM reasoning is optional and falls back to heuristics when Ollama is unavailable.",
-                "Embeddings are disabled by default and require the embeddings extra.",
+            notes=source_notes + [
+                'LLM reasoning is optional and falls back to heuristics when Ollama is unavailable.',
+                'Embeddings are disabled by default and require the embeddings extra.',
             ],
         )
-        write_json_output(report.model_dump(mode="json"), self.artifacts.search_report_json)
-        self.artifacts.search_report_md.write_text(build_search_report_markdown(report), encoding="utf-8")
-        self.logger.info("Report written to %s", self.artifacts.search_report_md)
+        write_json_output(report.model_dump(mode='json'), self.artifacts.search_report_json)
+        self.artifacts.search_report_md.write_text(build_search_report_markdown(report), encoding='utf-8')
+        self.logger.info('Report written to %s', self.artifacts.search_report_md)
         return report
 
     def run_all(self, input_path: Path, supplemental_files: list[Path] | None = None) -> SearchReport:
