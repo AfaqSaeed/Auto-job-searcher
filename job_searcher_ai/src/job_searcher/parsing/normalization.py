@@ -1,4 +1,4 @@
-﻿"""Normalization helpers for job listings."""
+"""Normalization helpers for job listings."""
 
 from __future__ import annotations
 
@@ -10,9 +10,24 @@ from job_searcher.utils.text import collect_phrase_matches, unique_preserve_orde
 
 
 SALARY_RE = re.compile(
-    r"(?P<currency>[$EURGBP€£])\s?(?P<min>\d[\d,\.]+)(?:\s?[-–to]+\s?(?P<max>\d[\d,\.]+))?",
+    r"(?P<currency>EUR|GBP|USD|\u20ac|\u00a3|\$)\s*(?P<min>\d[\d,]*(?:\.\d+)?)"
+    r"(?:\s*(?:-|\u2013|to)\s*(?P<max>\d[\d,]*(?:\.\d+)?))?",
     re.IGNORECASE,
 )
+
+
+def _coerce_salary_value(raw: str | None) -> float | None:
+    """Convert a numeric salary token into a float when it looks valid."""
+
+    if not raw:
+        return None
+    cleaned = raw.strip().rstrip('.,;:')
+    if not re.fullmatch(r"\d[\d,]*(?:\.\d+)?", cleaned):
+        return None
+    try:
+        return float(cleaned.replace(',', ''))
+    except ValueError:
+        return None
 
 
 def parse_salary_range(text: str) -> SalaryRange | None:
@@ -22,10 +37,11 @@ def parse_salary_range(text: str) -> SalaryRange | None:
     if not match:
         return None
     currency = match.group("currency")
-    minimum = float(match.group("min").replace(",", ""))
-    maximum_raw = match.group("max")
-    maximum = float(maximum_raw.replace(",", "")) if maximum_raw else None
-    normalized_currency = {"€": "EUR", "$": "USD", "£": "GBP"}.get(currency, currency)
+    minimum = _coerce_salary_value(match.group("min"))
+    if minimum is None:
+        return None
+    maximum = _coerce_salary_value(match.group("max"))
+    normalized_currency = {"\u20ac": "EUR", "$": "USD", "\u00a3": "GBP"}.get(currency.upper(), currency.upper())
     return SalaryRange(currency=normalized_currency, minimum=minimum, maximum=maximum, interval="year")
 
 

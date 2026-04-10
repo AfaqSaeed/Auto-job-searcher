@@ -1,4 +1,4 @@
-﻿from job_searcher.parsing.normalization import normalize_job_listing
+from job_searcher.parsing.normalization import normalize_job_listing, parse_salary_range
 from job_searcher.schemas import JobListing
 
 
@@ -23,3 +23,11 @@ def test_job_normalization_extracts_salary_and_work_mode() -> None:
     assert normalized.work_mode.value == "remote"
     assert normalized.salary is not None
     assert normalized.salary.minimum == 100000
+
+
+def test_parse_salary_range_ignores_invalid_numeric_tokens() -> None:
+    text = "Build Industry 4.0. systems for robotics. Compensation discussed later."
+
+    salary = parse_salary_range(text)
+
+    assert salary is None
