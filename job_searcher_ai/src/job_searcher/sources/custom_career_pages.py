@@ -1,8 +1,9 @@
-"""Custom career-page connector with same-domain crawling and sitemap fallback."""
+"""Custom career-page connector with same-domain crawling, sitemap fallback, and optional JS rendering."""
 
 from __future__ import annotations
 
 from collections import deque
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -13,6 +14,9 @@ from job_searcher.parsing.jobs import parse_static_job_page
 from job_searcher.schemas import JobListing, SearchQuery
 from job_searcher.sources.base import BaseJobSource, SourceContext, SourceRunResult
 from job_searcher.utils.urls import domain_for_url, join_url
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Page
 
 
 DEFAULT_JOB_HINTS = (
@@ -104,7 +108,15 @@ class CustomCareerPagesSource(BaseJobSource):
             return self._dedupe_preserve_order(discovered)
 
         sitemap_urls = self._collect_from_sitemaps(page, context)
-        return self._dedupe_preserve_order(sitemap_urls)
+        if sitemap_urls:
+            return self._dedupe_preserve_order(sitemap_urls)
+
+        if page.render_javascript:
+            rendered_urls = self._collect_rendered_candidate_urls(page, host, context)
+            if rendered_urls:
+                return self._dedupe_preserve_order(rendered_urls)
+
+        return []
 
     def _collect_from_sitemaps(self, page: CustomCareerPageConfig, context: SourceContext) -> list[str]:
         candidates: list[str] = []
@@ -120,6 +132,50 @@ class CustomCareerPagesSource(BaseJobSource):
                     candidates.append(loc)
         return candidates
 
+    def _collect_rendered_candidate_urls(
+        self,
+        page: CustomCareerPageConfig,
+        host: str,
+        context: SourceContext,
+    ) -> list[str]:
+        try:
+            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            context.add_note_diagnostic(
+                url=page.url,
+                message='Playwright is not installed; install the browser extra and run playwright install chromium',
+                kind='rendering_unavailable',
+            )
+            return []
+
+        candidates: list[str] = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            browser_page = browser.new_page()
+            browser_page.set_default_timeout(context.config.scraping.request_timeout_seconds * 1000)
+            try:
+                for url in [page.url, *page.seed_urls]:
+                    browser_page.goto(url, wait_until='networkidle')
+                    if page.rendered_wait_selector:
+                        try:
+                            browser_page.wait_for_selector(page.rendered_wait_selector)
+                        except PlaywrightTimeoutError:
+                            context.add_note_diagnostic(
+                                url=url,
+                                message=f'render wait selector not found: {page.rendered_wait_selector}',
+                                kind='rendering_timeout',
+                            )
+                    selector = page.rendered_link_selector or 'a[href]'
+                    html = browser_page.content()
+                    links = self._extract_links_by_selector(html, url, host, selector)
+                    if not links and selector != 'a[href]':
+                        links = self._extract_links(html, url, host)
+                    candidates.extend(link for link in links if self._is_job_candidate_url(link, page))
+            finally:
+                browser.close()
+        return candidates
+
     @staticmethod
     def _extract_links(html: str, base_url: str, host: str) -> list[str]:
         soup = BeautifulSoup(html, 'html.parser')
@@ -129,6 +185,20 @@ class CustomCareerPagesSource(BaseJobSource):
             if domain_for_url(href) != host:
                 continue
             links.append(href.split('#', 1)[0])
+        return links
+
+    @staticmethod
+    def _extract_links_by_selector(html: str, base_url: str, host: str, selector: str) -> list[str]:
+        soup = BeautifulSoup(html, 'html.parser')
+        links: list[str] = []
+        for node in soup.select(selector):
+            href = node.get('href')
+            if not href:
+                continue
+            url = join_url(base_url, href)
+            if domain_for_url(url) != host:
+                continue
+            links.append(url.split('#', 1)[0])
         return links
 
     @staticmethod
@@ -158,7 +228,7 @@ class CustomCareerPagesSource(BaseJobSource):
     def _looks_like_job(job: JobListing, html: str) -> bool:
         title = job.title.lower().strip()
         text = (job.description or '').lower()
-        if title in {'unknown title', 'vacancies', 'careers'}:
+        if title in {'unknown title', 'vacancies', 'careers', 'stellenangebote'}:
             return False
         if len(text) < 120:
             return False

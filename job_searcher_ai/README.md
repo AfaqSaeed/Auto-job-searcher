@@ -49,6 +49,7 @@ Optional extras:
 - Embeddings: `C:\Users\afaqs\anaconda3\python.exe -m pip install -e .[dev,embeddings]`
 - Streamlit UI experiments: `C:\Users\afaqs\anaconda3\python.exe -m pip install -e .[ui]`
 - Browser automation for future dynamic pages: `C:\Users\afaqs\anaconda3\python.exe -m pip install -e .[browser]`
+- After installing the browser extra, install Chromium once: `C:\Users\afaqs\anaconda3\python.exe -m playwright install chromium`
 
 ## Ollama
 
@@ -169,6 +170,26 @@ sources:
 ```
 
 The connector saves everything it discovered to `outputs/custom_career_pages_debug.json`, so you can inspect the parsed jobs before relying on ranking. Any discovered roles that also match your generated queries automatically flow into `outputs/discovered_jobs.json`, `outputs/jobs_ranked.json`, and `outputs/jobs_ranked.csv`.
+
+For JavaScript-rendered listings such as KUKA, enable browser rendering on that page config:
+
+```yaml
+sources:
+  toggles:
+    custom_career_pages: true
+  custom_career_pages:
+    - name: KUKA Careers DE
+      company: KUKA
+      url: https://www.kuka.com/de-de/unternehmen/karriere
+      include_url_patterns:
+        - /stellenangebote/
+      render_javascript: true
+      rendered_link_selector: a.m-results__anchor
+      rendered_wait_selector: a.m-results__anchor
+      max_pages: 200
+```
+
+This requires the optional browser extra plus `playwright install chromium`. The crawler will first try normal HTML and sitemap discovery, then fall back to a rendered DOM scrape when `render_javascript` is enabled.
 
 ## Limitations
 

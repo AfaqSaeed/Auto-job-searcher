@@ -12,10 +12,11 @@ class FakeCache:
 
 
 class FakeContext:
-    def __init__(self, html_map: dict[str, str]) -> None:
+    def __init__(self, html_map: dict[str, str], page_config: CustomCareerPageConfig | None = None) -> None:
         self.config = AppConfig()
         self.config.sources.custom_career_pages = [
-            CustomCareerPageConfig(
+            page_config
+            or CustomCareerPageConfig(
                 name='Example Careers',
                 company='Example Robotics',
                 url='https://example.com/careers',
@@ -36,6 +37,17 @@ class FakeContext:
         diagnostics = list(self._diagnostics)
         self._diagnostics = []
         return diagnostics
+
+    def add_note_diagnostic(self, *, url: str, message: str, kind: str, status_code: int | None = None) -> None:
+        self._diagnostics.append({'url': url, 'message': message, 'kind': kind, 'status_code': status_code})
+
+
+class RenderedSource(CustomCareerPagesSource):
+    def __init__(self, rendered_urls: list[str]) -> None:
+        self._rendered_urls = rendered_urls
+
+    def _collect_rendered_candidate_urls(self, page, host, context):
+        return list(self._rendered_urls)
 
 
 def test_custom_career_pages_fetches_and_filters_jobs() -> None:
@@ -76,3 +88,41 @@ def test_custom_career_pages_uses_sitemap_fallback() -> None:
     assert result.raw_jobs == 1
     assert len(result.discovered_jobs) == 1
     assert result.jobs[0].title == 'Perception Engineer'
+
+
+def test_extract_links_by_selector_reads_rendered_job_cards() -> None:
+    html = '<html><body><a class="m-results__anchor" href="/de-de/unternehmen/karriere/stellenangebote/senior-key-account-manager-automotive-oem-wmd-3456">Job</a></body></html>'
+
+    links = CustomCareerPagesSource._extract_links_by_selector(
+        html,
+        'https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote',
+        'www.kuka.com',
+        'a.m-results__anchor',
+    )
+
+    assert links == ['https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote/senior-key-account-manager-automotive-oem-wmd-3456']
+
+
+def test_custom_career_pages_can_use_rendered_fallback() -> None:
+    page_config = CustomCareerPageConfig(
+        name='KUKA Careers',
+        company='KUKA',
+        url='https://www.kuka.com/de-de/unternehmen/karriere',
+        include_url_patterns=['/stellenangebote/'],
+        render_javascript=True,
+        rendered_link_selector='a.m-results__anchor',
+    )
+    context = FakeContext(
+        {
+            'https://www.kuka.com/de-de/unternehmen/karriere': '<html><body><p>No job anchors in static HTML</p></body></html>',
+            'https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote/senior-key-account-manager-automotive-oem-wmd-3456': '<html><head><title>Senior Key Account Manager Automotive OEM (w/m/d)</title></head><body><h1>Senior Key Account Manager Automotive OEM (w/m/d)</h1><p>Responsibilities and apply details for a hybrid role in Augsburg.</p><p>Apply now</p></body></html>',
+        },
+        page_config=page_config,
+    )
+
+    result = RenderedSource([
+        'https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote/senior-key-account-manager-automotive-oem-wmd-3456'
+    ]).fetch_jobs([SearchQuery(text='key account manager')], context)
+
+    assert result.raw_jobs == 1
+    assert result.discovered_jobs[0].source_url.endswith('senior-key-account-manager-automotive-oem-wmd-3456')
