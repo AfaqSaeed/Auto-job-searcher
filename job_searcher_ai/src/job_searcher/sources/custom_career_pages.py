@@ -229,7 +229,13 @@ class CustomCareerPagesSource(BaseJobSource):
             browser_page = browser.new_page()
             browser_page.set_default_timeout(context.config.scraping.request_timeout_seconds * 1000)
             try:
-                for url in [page.url, *page.seed_urls]:
+                render_urls = self._render_urls_for_page(page)
+                LOGGER.info(
+                    "custom career page %s: rendered fallback will try %s urls",
+                    page.name,
+                    render_urls,
+                )
+                for url in render_urls:
                     LOGGER.info(
                         "custom career page %s: rendering %s",
                         page.name,
@@ -274,6 +280,18 @@ class CustomCareerPagesSource(BaseJobSource):
             finally:
                 browser.close()
         return candidates
+
+    @staticmethod
+    def _render_urls_for_page(page: CustomCareerPageConfig) -> list[str]:
+        urls = [page.url, *page.seed_urls]
+        base = page.url.rstrip('/')
+        for pattern in page.include_url_patterns:
+            normalized = pattern.strip().strip('/')
+            if not normalized or '/' in normalized:
+                continue
+            candidate = f"{base}/{normalized}"
+            urls.append(candidate)
+        return CustomCareerPagesSource._dedupe_preserve_order(urls)
 
     @staticmethod
     def _extract_links(html: str, base_url: str, host: str) -> list[str]:

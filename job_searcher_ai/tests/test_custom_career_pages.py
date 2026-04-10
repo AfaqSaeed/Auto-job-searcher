@@ -153,3 +153,20 @@ def test_custom_career_pages_retries_with_rendered_fallback_when_static_candidat
     assert result.raw_jobs == 1
     assert result.discovered_jobs[0].title == 'Senior Key Account Manager Automotive OEM (w/m/d)'
     assert result.discovered_jobs[0].source_url.endswith('senior-key-account-manager-automotive-oem-wmd-3456')
+
+
+def test_render_urls_for_page_appends_simple_include_pattern_segments() -> None:
+    page_config = CustomCareerPageConfig(
+        name='KUKA Careers',
+        company='KUKA',
+        url='https://www.kuka.com/de-de/unternehmen/karriere',
+        include_url_patterns=['/stellenangebote/'],
+        render_javascript=True,
+    )
+
+    urls = CustomCareerPagesSource._render_urls_for_page(page_config)
+
+    assert urls == [
+        'https://www.kuka.com/de-de/unternehmen/karriere',
+        'https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote',
+    ]
