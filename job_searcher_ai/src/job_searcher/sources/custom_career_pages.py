@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+import logging
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from xml.etree import ElementTree
@@ -14,6 +15,9 @@ from job_searcher.parsing.jobs import parse_static_job_page
 from job_searcher.schemas import JobListing, SearchQuery
 from job_searcher.sources.base import BaseJobSource, SourceContext, SourceRunResult
 from job_searcher.utils.urls import domain_for_url, join_url
+
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -61,12 +65,50 @@ class CustomCareerPagesSource(BaseJobSource):
 
     def _discover_jobs_for_page(self, page: CustomCareerPageConfig, context: SourceContext) -> list[JobListing]:
         candidate_urls = self._collect_candidate_urls(page, context)
+        LOGGER.info(
+            "custom career page %s: static discovery produced %s candidate urls",
+            page.name,
+            len(candidate_urls),
+        )
+        if candidate_urls:
+            LOGGER.info(
+                "custom career page %s: static candidate sample: %s",
+                page.name,
+                candidate_urls[:3],
+            )
         jobs = self._build_jobs_from_candidate_urls(candidate_urls, page, context)
+        LOGGER.info(
+            "custom career page %s: static candidate parsing produced %s jobs",
+            page.name,
+            len(jobs),
+        )
         if jobs or not page.render_javascript:
             return jobs
 
+        LOGGER.info(
+            "custom career page %s: retrying with rendered DOM fallback using selector %s",
+            page.name,
+            page.rendered_link_selector or 'a[href]',
+        )
         rendered_urls = self._collect_rendered_candidate_urls(page, domain_for_url(page.url), context)
-        return self._build_jobs_from_candidate_urls(rendered_urls, page, context)
+        LOGGER.info(
+            "custom career page %s: rendered discovery produced %s candidate urls",
+            page.name,
+            len(rendered_urls),
+        )
+        if rendered_urls:
+            LOGGER.info(
+                "custom career page %s: rendered candidate sample: %s",
+                page.name,
+                rendered_urls[:5],
+            )
+        rendered_jobs = self._build_jobs_from_candidate_urls(rendered_urls, page, context)
+        LOGGER.info(
+            "custom career page %s: rendered candidate parsing produced %s jobs",
+            page.name,
+            len(rendered_jobs),
+        )
+        return rendered_jobs
 
     def _build_jobs_from_candidate_urls(
         self,
@@ -118,12 +160,28 @@ class CustomCareerPagesSource(BaseJobSource):
                     queue.append(link)
 
         if discovered:
-            return self._dedupe_preserve_order(discovered)
+            deduped = self._dedupe_preserve_order(discovered)
+            LOGGER.info(
+                "custom career page %s: in-page crawl found %s candidate urls after dedupe",
+                page.name,
+                len(deduped),
+            )
+            return deduped
 
         sitemap_urls = self._collect_from_sitemaps(page, context)
         if sitemap_urls:
-            return self._dedupe_preserve_order(sitemap_urls)
+            deduped = self._dedupe_preserve_order(sitemap_urls)
+            LOGGER.info(
+                "custom career page %s: sitemap discovery found %s candidate urls after dedupe",
+                page.name,
+                len(deduped),
+            )
+            return deduped
 
+        LOGGER.info(
+            "custom career page %s: no candidate urls found from static crawl or sitemap fallback",
+            page.name,
+        )
         return []
 
     def _collect_from_sitemaps(self, page: CustomCareerPageConfig, context: SourceContext) -> list[str]:
@@ -150,6 +208,10 @@ class CustomCareerPagesSource(BaseJobSource):
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
             from playwright.sync_api import sync_playwright
         except ImportError:
+            LOGGER.warning(
+                "custom career page %s: Playwright is unavailable for rendered fallback",
+                page.name,
+            )
             context.add_note_diagnostic(
                 url=page.url,
                 message='Playwright is not installed; install the browser extra and run playwright install chromium',
@@ -159,11 +221,20 @@ class CustomCareerPagesSource(BaseJobSource):
 
         candidates: list[str] = []
         with sync_playwright() as playwright:
+            LOGGER.info(
+                "custom career page %s: launching Playwright rendered fallback",
+                page.name,
+            )
             browser = playwright.chromium.launch(headless=True)
             browser_page = browser.new_page()
             browser_page.set_default_timeout(context.config.scraping.request_timeout_seconds * 1000)
             try:
                 for url in [page.url, *page.seed_urls]:
+                    LOGGER.info(
+                        "custom career page %s: rendering %s",
+                        page.name,
+                        url,
+                    )
                     browser_page.goto(url, wait_until='networkidle')
                     if page.rendered_wait_selector:
                         try:
@@ -177,9 +248,29 @@ class CustomCareerPagesSource(BaseJobSource):
                     selector = page.rendered_link_selector or 'a[href]'
                     html = browser_page.content()
                     links = self._extract_links_by_selector(html, url, host, selector)
+                    LOGGER.info(
+                        "custom career page %s: rendered selector %s matched %s links on %s",
+                        page.name,
+                        selector,
+                        len(links),
+                        url,
+                    )
                     if not links and selector != 'a[href]':
                         links = self._extract_links(html, url, host)
-                    candidates.extend(link for link in links if self._is_job_candidate_url(link, page))
+                        LOGGER.info(
+                            "custom career page %s: fallback anchor scan matched %s links on %s",
+                            page.name,
+                            len(links),
+                            url,
+                        )
+                    matching_links = [link for link in links if self._is_job_candidate_url(link, page)]
+                    LOGGER.info(
+                        "custom career page %s: %s rendered links survived URL pattern filtering on %s",
+                        page.name,
+                        len(matching_links),
+                        url,
+                    )
+                    candidates.extend(matching_links)
             finally:
                 browser.close()
         return candidates
