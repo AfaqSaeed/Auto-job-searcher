@@ -125,6 +125,7 @@ The pipeline writes:
 - `outputs/discovered_jobs.json`
 - `outputs/filtered_jobs_debug.json`
 - `outputs/custom_career_pages_debug.json`
+- `outputs/custom_career_page_filters.json`
 - `outputs/jobs_ranked.json`
 - `outputs/jobs_ranked.csv`
 - `outputs/top_matches.md`
@@ -190,6 +191,8 @@ sources:
 ```
 
 This requires the optional browser extra plus `playwright install chromium`. The crawler will first try normal HTML and sitemap discovery, then fall back to a rendered DOM scrape when `render_javascript` is enabled.
+
+When rendered pages expose built-in filters, the source now captures them into `outputs/custom_career_page_filters.json`. Each snapshot includes detected filter field labels, inferred semantic kinds such as `country_region`, `company`, `category`, and `search_text`, plus the available options seen in the DOM. This is the foundation for driving site-native filters generically across many career pages instead of hand-coding one site at a time.
 
 ## Limitations
 

@@ -170,3 +170,28 @@ def test_render_urls_for_page_appends_simple_include_pattern_segments() -> None:
         'https://www.kuka.com/de-de/unternehmen/karriere',
         'https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote',
     ]
+
+
+def test_extract_filter_fields_discovers_generic_site_filters() -> None:
+    html = """
+    <html><body>
+      <label for="country">Country / Region</label>
+      <select id="country" name="country">
+        <option></option>
+        <option>Germany</option>
+        <option>Netherlands</option>
+      </select>
+      <label for="company">Company</label>
+      <select id="company" name="company" multiple="multiple">
+        <option>KUKA</option>
+        <option>Swisslog</option>
+      </select>
+      <input id="search" name="q" type="search" placeholder="Search jobs" />
+    </body></html>
+    """
+
+    fields = CustomCareerPagesSource._extract_filter_fields(html)
+
+    assert any(field['semantic_kind'] == 'country_region' and 'Germany' in field['options'] for field in fields)
+    assert any(field['semantic_kind'] == 'company' and 'Swisslog' in field['options'] for field in fields)
+    assert any(field['semantic_kind'] == 'search_text' and field['type'] == 'search' for field in fields)

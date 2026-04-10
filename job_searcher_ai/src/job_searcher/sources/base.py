@@ -6,6 +6,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Any
 
 import requests
 
@@ -37,6 +38,7 @@ class SourceRunResult:
     matched_jobs: int = 0
     diagnostics: list[RequestDiagnostic] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    debug_data: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> str:
         """Build a concise source result summary for logs and reports."""
