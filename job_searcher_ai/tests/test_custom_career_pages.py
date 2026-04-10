@@ -126,3 +126,30 @@ def test_custom_career_pages_can_use_rendered_fallback() -> None:
 
     assert result.raw_jobs == 1
     assert result.discovered_jobs[0].source_url.endswith('senior-key-account-manager-automotive-oem-wmd-3456')
+
+
+def test_custom_career_pages_retries_with_rendered_fallback_when_static_candidate_is_listing_page() -> None:
+    page_config = CustomCareerPageConfig(
+        name='KUKA Careers',
+        company='KUKA',
+        url='https://www.kuka.com/de-de/unternehmen/karriere',
+        include_url_patterns=['/stellenangebote/'],
+        render_javascript=True,
+        rendered_link_selector='a.m-results__anchor',
+    )
+    context = FakeContext(
+        {
+            'https://www.kuka.com/de-de/unternehmen/karriere': '<html><body><a href="/de-de/unternehmen/karriere/stellenangebote">Stellenangebote</a></body></html>',
+            'https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote': '<html><head><title>Stellenangebote</title></head><body><h1>Stellenangebote</h1><p>51 Results</p></body></html>',
+            'https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote/senior-key-account-manager-automotive-oem-wmd-3456': '<html><head><title>Senior Key Account Manager Automotive OEM (w/m/d)</title></head><body><h1>Senior Key Account Manager Automotive OEM (w/m/d)</h1><p>Responsibilities and apply details for a hybrid role in Augsburg. Apply now.</p></body></html>',
+        },
+        page_config=page_config,
+    )
+
+    result = RenderedSource([
+        'https://www.kuka.com/de-de/unternehmen/karriere/stellenangebote/senior-key-account-manager-automotive-oem-wmd-3456'
+    ]).fetch_jobs([SearchQuery(text='key account manager')], context)
+
+    assert result.raw_jobs == 1
+    assert result.discovered_jobs[0].title == 'Senior Key Account Manager Automotive OEM (w/m/d)'
+    assert result.discovered_jobs[0].source_url.endswith('senior-key-account-manager-automotive-oem-wmd-3456')

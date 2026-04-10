@@ -61,6 +61,19 @@ class CustomCareerPagesSource(BaseJobSource):
 
     def _discover_jobs_for_page(self, page: CustomCareerPageConfig, context: SourceContext) -> list[JobListing]:
         candidate_urls = self._collect_candidate_urls(page, context)
+        jobs = self._build_jobs_from_candidate_urls(candidate_urls, page, context)
+        if jobs or not page.render_javascript:
+            return jobs
+
+        rendered_urls = self._collect_rendered_candidate_urls(page, domain_for_url(page.url), context)
+        return self._build_jobs_from_candidate_urls(rendered_urls, page, context)
+
+    def _build_jobs_from_candidate_urls(
+        self,
+        candidate_urls: list[str],
+        page: CustomCareerPageConfig,
+        context: SourceContext,
+    ) -> list[JobListing]:
         jobs: list[JobListing] = []
         seen_urls: set[str] = set()
         for url in candidate_urls:
@@ -110,11 +123,6 @@ class CustomCareerPagesSource(BaseJobSource):
         sitemap_urls = self._collect_from_sitemaps(page, context)
         if sitemap_urls:
             return self._dedupe_preserve_order(sitemap_urls)
-
-        if page.render_javascript:
-            rendered_urls = self._collect_rendered_candidate_urls(page, host, context)
-            if rendered_urls:
-                return self._dedupe_preserve_order(rendered_urls)
 
         return []
 
