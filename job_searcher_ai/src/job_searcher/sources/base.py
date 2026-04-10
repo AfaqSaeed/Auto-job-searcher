@@ -59,6 +59,11 @@ class SourceRunResult:
         if self.diagnostics:
             primary = self.diagnostics[0]
             if primary.status_code == 404:
+                if self.source_name == "custom_career_pages":
+                    return (
+                        f"Fetched 0 jobs from {self.source_name}: an optional discovery URL returned 404 "
+                        "(commonly a sitemap path or auxiliary page), so rendered or in-page discovery may be needed"
+                    )
                 return (
                     f"Fetched 0 jobs from {self.source_name}: endpoint returned 404, "
                     "which usually means a wrong board slug or the company is not using that ATS"
