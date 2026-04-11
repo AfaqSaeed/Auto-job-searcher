@@ -192,7 +192,27 @@ sources:
 
 This requires the optional browser extra plus `playwright install chromium`. The crawler will first try normal HTML and sitemap discovery, then fall back to a rendered DOM scrape when `render_javascript` is enabled.
 
-When rendered pages expose built-in filters, the source now captures them into `outputs/custom_career_page_filters.json`. Each snapshot includes detected filter field labels, inferred semantic kinds such as `country_region`, `company`, `category`, and `search_text`, plus the available options seen in the DOM. This is the foundation for driving site-native filters generically across many career pages instead of hand-coding one site at a time.
+When rendered pages expose built-in filters, the source now captures them into `outputs/custom_career_page_filters.json`. Each snapshot includes detected filter field labels, inferred semantic kinds such as `country_region`, `company`, `category`, and `search_text`, plus the available options seen in the DOM. When `apply_site_filters: true` is set for a page, the source also derives a small set of generic filter plans from your config and generated queries and tries them in the rendered page before collecting result links.
+
+
+Example for a site with a built-in search and filter system:
+
+```yaml
+sources:
+  custom_career_pages:
+    - name: Fraunhofer Jobs EN
+      company: Fraunhofer
+      url: https://jobs.fraunhofer.de/search/?locale=en_US
+      include_url_patterns:
+        - /job/
+      render_javascript: true
+      apply_site_filters: true
+      rendered_link_selector: a[href*="/job/"]
+      rendered_wait_selector: a[href*="/job/"]
+      max_pages: 200
+```
+
+This lets the generic source inspect fields like `Search by Keyword`, `Region`, `Institute`, and similar controls, derive filter plans such as `country_region=Germany` plus relevant search terms, and then collect result URLs from the filtered result set.
 
 ## Limitations
 

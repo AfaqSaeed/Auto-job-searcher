@@ -1,77 +1,73 @@
 search:
   locations:
-    - Berlin
-    - Munich
-    - Hamburg
-    - Remote
+  - Berlin
+  - Munich
+  - Hamburg
+  - Remote
   job_titles:
-    - Computer Vision Engineer
-    - Perception Engineer
-    - Research Engineer, Multimodal AI
-    - 3D Vision Engineer
-    - Mapping and Localization Engineer
+  - Computer Vision Engineer
+  - Perception Engineer
+  - Research Engineer, Multimodal AI
+  - 3D Vision Engineer
+  - Mapping and Localization Engineer
   include_keywords:
-    - computer vision
-    - multimodal perception
-    - visual perception
-    - slam
-    - sensor fusion
-    - edge deployment
+  - computer vision
+  - multimodal perception
+  - visual perception
+  - slam
+  - sensor fusion
+  - edge deployment
   exclude_keywords:
-    - account executive
-    - sales
-    - recruiter
-    - hr
+  - account executive
+  - sales
+  - recruiter
+  - hr
   preferred_industries:
-    - autonomous driving
-    - robotics
-    - automotive
-    - industrial ai
+  - autonomous driving
+  - robotics
+  - automotive
+  - industrial ai
   target_countries:
-    - Germany
-    - Netherlands
-    - United Kingdom
+  - Germany
+  - Netherlands
+  - United Kingdom
   remote_preference: hybrid
   experience_level: senior
   query_limit: 40
   english_first: true
   include_german_variants: true
-
 criteria:
   locations:
-    - Berlin
-    - Munich
-    - Remote
+  - Berlin
+  - Munich
+  - Remote
   remote_preference: hybrid
   visa_constraints:
-    - needs visa sponsorship review
-  minimum_salary: 80000
+  - needs visa sponsorship review
+  minimum_salary: 0
   target_titles:
-    - Perception Engineer
-    - Computer Vision Engineer
-    - ML Engineer, Vision
-    - Research Engineer, Multimodal AI
+  - Perception Engineer
+  - Computer Vision Engineer
+  - ML Engineer, Vision
+  - Research Engineer, Multimodal AI
   blacklist_companies: []
   preferred_industries:
-    - robotics
-    - autonomous driving
-    - mapping
+  - robotics
+  - autonomous driving
+  - mapping
   seniority_range:
-    - mid
-    - senior
-    - staff
-
+  - mid
+  - senior
+  - staff
 ollama:
   enabled: true
   host: http://localhost:11434
   model: llama3.1:8b
   temperature: 0.2
   timeout_seconds: 120
-
 embeddings:
   enabled: false
   model_name: BAAI/bge-small-en-v1.5
-
 scraping:
   request_timeout_seconds: 20
   rate_limit_seconds: 1.0
@@ -79,24 +75,44 @@ scraping:
   cache_ttl_hours: 24
   respect_robots: true
   user_agent: job_searcher_ai/0.1 (+personal job research)
-
 sources:
   toggles:
+    custom_career_pages: true
     greenhouse: true
-    lever: true
+    lever: false
     static_pages: false
     rss: false
-    manual_import: true
+    manual_import: false
+  custom_career_pages:
+  - name: KUKA Careers DE
+    company: KUKA
+    url: https://www.kuka.com/de-de/unternehmen/karriere
+    include_url_patterns:
+    - /stellenangebote/
+    render_javascript: true
+    rendered_link_selector: a.m-results__anchor
+    rendered_wait_selector: a.m-results__anchor
+    max_pages: 200
+    apply_site_filters: true
+  - name: Fraunhofer Jobs EN
+    company: Fraunhofer
+    url: https://jobs.fraunhofer.de/search/?locale=en_US
+    include_url_patterns:
+    - /job/
+    render_javascript: true
+    apply_site_filters: true
+    rendered_link_selector: a[href*="/job/"]
+    rendered_wait_selector: a[href*="/job/"]
+    max_pages: 200
   greenhouse_boards:
-    - wayve
-    - ambi-robotics
+  - wayve
+  - navvis
   lever_boards:
-    - openai
+  - openai
   static_pages: []
   rss_feeds: []
   manual_files:
-    - data/manual_jobs.json
-
+  - data/manual_jobs.json
 outputs:
   directory: outputs
   cache_directory: .cache

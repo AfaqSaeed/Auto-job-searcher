@@ -85,6 +85,7 @@ class CustomCareerPageConfig(BaseModel):
     seed_urls: list[str] = Field(default_factory=list)
     max_pages: int = 150
     render_javascript: bool = False
+    apply_site_filters: bool = False
     rendered_link_selector: str | None = None
     rendered_wait_selector: str | None = None
     sitemap_paths: list[str] = Field(default_factory=lambda: ["/sitemap.xml", "/sitemap_index.xml"])

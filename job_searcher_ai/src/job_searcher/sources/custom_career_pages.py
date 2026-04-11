@@ -62,7 +62,7 @@ class CustomCareerPagesSource(BaseJobSource):
             return result
 
         for page in pages:
-            discovered = self._discover_jobs_for_page(page, context)
+            discovered = self._discover_jobs_for_page(page, context, queries)
             if not discovered:
                 result.notes.append(f"{page.name}: no candidate job detail pages were discovered")
                 continue
@@ -79,7 +79,12 @@ class CustomCareerPagesSource(BaseJobSource):
         result.diagnostics = context.take_diagnostics()
         return result
 
-    def _discover_jobs_for_page(self, page: CustomCareerPageConfig, context: SourceContext) -> list[JobListing]:
+    def _discover_jobs_for_page(
+        self,
+        page: CustomCareerPageConfig,
+        context: SourceContext,
+        queries: list[SearchQuery],
+    ) -> list[JobListing]:
         candidate_urls = self._collect_candidate_urls(page, context)
         LOGGER.info(
             'custom career page %s: static discovery produced %s candidate urls',
@@ -98,33 +103,56 @@ class CustomCareerPagesSource(BaseJobSource):
             page.name,
             len(jobs),
         )
-        if jobs or not page.render_javascript:
-            return jobs
 
-        LOGGER.info(
-            'custom career page %s: retrying with rendered DOM fallback using selector %s',
-            page.name,
-            page.rendered_link_selector or 'a[href]',
-        )
-        rendered_urls = self._collect_rendered_candidate_urls(page, domain_for_url(page.url), context)
-        LOGGER.info(
-            'custom career page %s: rendered discovery produced %s candidate urls',
-            page.name,
-            len(rendered_urls),
-        )
-        if rendered_urls:
+        merged_jobs = list(jobs)
+        if page.render_javascript and not jobs:
             LOGGER.info(
-                'custom career page %s: rendered candidate sample: %s',
+                'custom career page %s: retrying with rendered DOM fallback using selector %s',
                 page.name,
-                rendered_urls[:5],
+                page.rendered_link_selector or 'a[href]',
             )
-        rendered_jobs = self._build_jobs_from_candidate_urls(rendered_urls, page, context)
-        LOGGER.info(
-            'custom career page %s: rendered candidate parsing produced %s jobs',
-            page.name,
-            len(rendered_jobs),
-        )
-        return rendered_jobs
+            rendered_urls = self._collect_rendered_candidate_urls(page, domain_for_url(page.url), context)
+            LOGGER.info(
+                'custom career page %s: rendered discovery produced %s candidate urls',
+                page.name,
+                len(rendered_urls),
+            )
+            if rendered_urls:
+                LOGGER.info(
+                    'custom career page %s: rendered candidate sample: %s',
+                    page.name,
+                    rendered_urls[:5],
+                )
+            rendered_jobs = self._build_jobs_from_candidate_urls(rendered_urls, page, context)
+            LOGGER.info(
+                'custom career page %s: rendered candidate parsing produced %s jobs',
+                page.name,
+                len(rendered_jobs),
+            )
+            merged_jobs = self._merge_jobs(merged_jobs, rendered_jobs)
+
+        if page.render_javascript and page.apply_site_filters:
+            filtered_urls = self._collect_site_filtered_candidate_urls(page, context, queries)
+            LOGGER.info(
+                'custom career page %s: site-filter execution produced %s candidate urls',
+                page.name,
+                len(filtered_urls),
+            )
+            if filtered_urls:
+                LOGGER.info(
+                    'custom career page %s: site-filter candidate sample: %s',
+                    page.name,
+                    filtered_urls[:5],
+                )
+            filtered_jobs = self._build_jobs_from_candidate_urls(filtered_urls, page, context)
+            LOGGER.info(
+                'custom career page %s: site-filter candidate parsing produced %s jobs',
+                page.name,
+                len(filtered_jobs),
+            )
+            merged_jobs = self._merge_jobs(merged_jobs, filtered_jobs)
+
+        return merged_jobs
 
     def _build_jobs_from_candidate_urls(
         self,
@@ -152,6 +180,17 @@ class CustomCareerPagesSource(BaseJobSource):
                 continue
             jobs.append(job)
         return jobs
+
+    @staticmethod
+    def _merge_jobs(existing: list[JobListing], incoming: list[JobListing]) -> list[JobListing]:
+        seen = {job.source_url for job in existing}
+        merged = list(existing)
+        for job in incoming:
+            if job.source_url in seen:
+                continue
+            seen.add(job.source_url)
+            merged.append(job)
+        return merged
 
     def _collect_candidate_urls(self, page: CustomCareerPageConfig, context: SourceContext) -> list[str]:
         queue = deque([page.url, *page.seed_urls])
@@ -300,6 +339,88 @@ class CustomCareerPagesSource(BaseJobSource):
                 browser.close()
         return candidates
 
+    def _collect_site_filtered_candidate_urls(
+        self,
+        page: CustomCareerPageConfig,
+        context: SourceContext,
+        queries: list[SearchQuery],
+    ) -> list[str]:
+        try:
+            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            LOGGER.warning(
+                'custom career page %s: Playwright is unavailable for site-filter execution',
+                page.name,
+            )
+            context.add_note_diagnostic(
+                url=page.url,
+                message='Playwright is not installed; install the browser extra and run playwright install chromium',
+                kind='rendering_unavailable',
+            )
+            return []
+
+        candidates: list[str] = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            browser_page = browser.new_page()
+            browser_page.set_default_timeout(context.config.scraping.request_timeout_seconds * 1000)
+            try:
+                render_urls = self._render_urls_for_page(page)
+                for url in render_urls:
+                    browser_page.goto(url, wait_until='networkidle')
+                    html = browser_page.content()
+                    self._capture_filter_snapshot(page, url, html)
+                    if page.rendered_wait_selector:
+                        try:
+                            browser_page.wait_for_selector(page.rendered_wait_selector)
+                            html = browser_page.content()
+                            self._capture_filter_snapshot(page, url, html)
+                        except PlaywrightTimeoutError:
+                            continue
+                    fields = self._extract_filter_fields(html)
+                    plans = self._derive_filter_plans(fields, page, context.config, queries)
+                    LOGGER.info(
+                        'custom career page %s: derived %s site-filter plans on %s',
+                        page.name,
+                        len(plans),
+                        url,
+                    )
+                    if plans:
+                        LOGGER.info(
+                            'custom career page %s: site-filter plan sample on %s: %s',
+                            page.name,
+                            url,
+                            plans[:3],
+                        )
+                    for plan in plans:
+                        browser_page.goto(url, wait_until='networkidle')
+                        if page.rendered_wait_selector:
+                            try:
+                                browser_page.wait_for_selector(page.rendered_wait_selector)
+                            except PlaywrightTimeoutError:
+                                continue
+                        self._apply_filter_plan(browser_page, fields, plan)
+                        current_html = browser_page.content()
+                        self._capture_filter_snapshot(page, url, current_html)
+                        selector = page.rendered_link_selector or 'a[href]'
+                        host = domain_for_url(url)
+                        links = self._extract_links_by_selector(current_html, url, host, selector)
+                        if not links and selector != 'a[href]':
+                            links = self._extract_links(current_html, url, host)
+                        matching_links = [link for link in links if self._is_job_candidate_url(link, page)]
+                        LOGGER.info(
+                            'custom career page %s: plan %s produced %s matching links on %s',
+                            page.name,
+                            plan,
+                            len(matching_links),
+                            url,
+                        )
+                        candidates.extend(matching_links)
+            finally:
+                browser.close()
+        return self._dedupe_preserve_order(candidates)
+
     def _capture_filter_snapshot(self, page: CustomCareerPageConfig, url: str, html: str) -> None:
         fields = self._extract_filter_fields(html)
         if not fields:
@@ -335,6 +456,7 @@ class CustomCareerPagesSource(BaseJobSource):
                     'label': label,
                     'type': 'multi_select' if select.has_attr('multiple') else 'select',
                     'semantic_kind': CustomCareerPagesSource._infer_filter_kind(select, label),
+                    'selector': CustomCareerPagesSource._selector_for_node(select),
                     'options': options[:200],
                 }
             )
@@ -354,6 +476,7 @@ class CustomCareerPagesSource(BaseJobSource):
                     'label': label or placeholder,
                     'type': input_type,
                     'semantic_kind': CustomCareerPagesSource._infer_filter_kind(input_node, label or placeholder),
+                    'selector': CustomCareerPagesSource._selector_for_node(input_node),
                     'options': values,
                 }
             )
@@ -384,6 +507,16 @@ class CustomCareerPagesSource(BaseJobSource):
         return ''
 
     @staticmethod
+    def _selector_for_node(node) -> str | None:
+        field_id = node.get('id')
+        if field_id:
+            return f"#{field_id}"
+        name = node.get('name')
+        if name:
+            return f"{node.name}[name='{name}']"
+        return None
+
+    @staticmethod
     def _infer_filter_kind(node, label: str) -> str:
         haystack = normalize_text(' '.join(filter(None, [label, node.get('name'), node.get('id'), node.get('placeholder')])))
         for kind, hints in FILTER_KIND_HINTS.items():
@@ -401,6 +534,117 @@ class CustomCareerPagesSource(BaseJobSource):
                 continue
             urls.append(f'{base}/{normalized}')
         return CustomCareerPagesSource._dedupe_preserve_order(urls)
+
+    @staticmethod
+    def _derive_filter_plans(
+        fields: list[dict],
+        page: CustomCareerPageConfig,
+        config,
+        queries: list[SearchQuery],
+    ) -> list[dict[str, str]]:
+        if not fields:
+            return []
+        field_by_kind = {field['semantic_kind']: field for field in fields if field.get('semantic_kind') != 'unknown'}
+        base_plan: dict[str, str] = {}
+
+        country_field = field_by_kind.get('country_region')
+        if country_field:
+            country_value = CustomCareerPagesSource._first_option_match(
+                country_field.get('options', []),
+                config.search.target_countries,
+            )
+            if country_value:
+                base_plan['country_region'] = country_value
+
+        company_field = field_by_kind.get('company')
+        if company_field and page.company:
+            company_value = CustomCareerPagesSource._first_option_match(company_field.get('options', []), [page.company])
+            if company_value:
+                base_plan['company'] = company_value
+
+        category_field = field_by_kind.get('category')
+        category_candidates = config.search.job_titles + config.search.include_keywords
+        if category_field:
+            category_value = CustomCareerPagesSource._first_option_match(category_field.get('options', []), category_candidates)
+            if category_value:
+                base_plan['category'] = category_value
+
+        plans: list[dict[str, str]] = []
+        if base_plan:
+            plans.append(dict(base_plan))
+
+        search_field = field_by_kind.get('search_text')
+        if search_field:
+            for term in CustomCareerPagesSource._search_terms_for_site_filters(config, queries)[:6]:
+                plan = dict(base_plan)
+                plan['search_text'] = term
+                plans.append(plan)
+
+        deduped: list[dict[str, str]] = []
+        seen: set[tuple[tuple[str, str], ...]] = set()
+        for plan in plans:
+            key = tuple(sorted(plan.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(plan)
+        return deduped[:8]
+
+    @staticmethod
+    def _search_terms_for_site_filters(config, queries: list[SearchQuery]) -> list[str]:
+        terms: list[str] = []
+        terms.extend(config.search.job_titles)
+        terms.extend(config.search.include_keywords)
+        for query in queries:
+            if query.title:
+                terms.append(query.title)
+            terms.extend(query.terms)
+            if len(query.text.split()) <= 4:
+                terms.append(query.text)
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for term in terms:
+            cleaned = term.strip()
+            normalized = normalize_text(cleaned)
+            if not cleaned or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(cleaned)
+        return deduped
+
+    @staticmethod
+    def _first_option_match(options: list[str], desired_values: list[str]) -> str | None:
+        normalized_options = [(option, normalize_text(option)) for option in options]
+        for desired in desired_values:
+            desired_normalized = normalize_text(desired)
+            for option, option_normalized in normalized_options:
+                if desired_normalized == option_normalized or desired_normalized in option_normalized or option_normalized in desired_normalized:
+                    return option
+        return None
+
+    @staticmethod
+    def _apply_filter_plan(browser_page, fields: list[dict], plan: dict[str, str]) -> None:
+        for semantic_kind, desired_value in plan.items():
+            field = next((item for item in fields if item.get('semantic_kind') == semantic_kind and item.get('selector')), None)
+            if not field:
+                continue
+            selector = field['selector']
+            try:
+                if field['type'] in {'select', 'multi_select'}:
+                    browser_page.locator(selector).select_option(label=desired_value)
+                elif field['type'] in {'search', 'text'}:
+                    locator = browser_page.locator(selector)
+                    locator.fill('')
+                    locator.fill(desired_value)
+                    locator.press('Enter')
+                elif field['type'] in {'checkbox', 'radio'}:
+                    browser_page.locator(selector).check()
+            except Exception:
+                continue
+        try:
+            browser_page.wait_for_load_state('networkidle')
+        except Exception:
+            pass
 
     @staticmethod
     def _extract_links(html: str, base_url: str, host: str) -> list[str]:

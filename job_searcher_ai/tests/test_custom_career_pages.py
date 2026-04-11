@@ -195,3 +195,56 @@ def test_extract_filter_fields_discovers_generic_site_filters() -> None:
     assert any(field['semantic_kind'] == 'country_region' and 'Germany' in field['options'] for field in fields)
     assert any(field['semantic_kind'] == 'company' and 'Swisslog' in field['options'] for field in fields)
     assert any(field['semantic_kind'] == 'search_text' and field['type'] == 'search' for field in fields)
+
+
+def test_derive_filter_plans_uses_country_company_and_search_terms() -> None:
+    page_config = CustomCareerPageConfig(
+        name='Fraunhofer Jobs',
+        company='Fraunhofer',
+        url='https://jobs.fraunhofer.de/search/?locale=en_US',
+        include_url_patterns=['/job/'],
+        render_javascript=True,
+        apply_site_filters=True,
+    )
+    config = AppConfig()
+    config.search.target_countries = ['Germany']
+    config.search.job_titles = ['Computer Vision Engineer']
+    config.search.include_keywords = ['machine learning', 'computer vision']
+    fields = [
+        {
+            'name': 'country',
+            'label': 'Country / Region',
+            'type': 'select',
+            'semantic_kind': 'country_region',
+            'selector': '#country',
+            'options': ['Germany', 'Netherlands'],
+        },
+        {
+            'name': 'company',
+            'label': 'Company',
+            'type': 'select',
+            'semantic_kind': 'company',
+            'selector': '#company',
+            'options': ['Fraunhofer', 'Other'],
+        },
+        {
+            'name': 'query',
+            'label': 'Search by Keyword',
+            'type': 'search',
+            'semantic_kind': 'search_text',
+            'selector': '#query',
+            'options': [],
+        },
+    ]
+
+    plans = CustomCareerPagesSource._derive_filter_plans(
+        fields,
+        page_config,
+        config,
+        [SearchQuery(text='computer vision engineer germany')],
+    )
+
+    assert plans
+    assert plans[0]['country_region'] == 'Germany'
+    assert plans[0]['company'] == 'Fraunhofer'
+    assert any(plan.get('search_text') == 'Computer Vision Engineer' for plan in plans)
