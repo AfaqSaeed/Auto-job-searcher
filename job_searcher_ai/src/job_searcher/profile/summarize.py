@@ -19,6 +19,10 @@ def summarize_profile(profile: UserProfile, client: OllamaClient | None) -> Prof
     if client is None:
         return _fallback_insights(profile)
 
+    LOGGER.info(
+        "Requesting profile keyword extraction from Ollama model %s",
+        client.settings.model,
+    )
     try:
         payload = client.generate_json(
             build_profile_summary_prompt(profile.raw_text[:8000]),
@@ -28,7 +32,7 @@ def summarize_profile(profile: UserProfile, client: OllamaClient | None) -> Prof
         LOGGER.warning("Falling back to heuristic profile insights: %s", exc)
         return _fallback_insights(profile)
 
-    return ProfileInsights.model_validate(
+    insights = ProfileInsights.model_validate(
         {
             "summary": payload.get("summary", profile.summary),
             "role_families": unique_preserve_order(payload.get("role_families", profile.role_families)),
@@ -38,6 +42,13 @@ def summarize_profile(profile: UserProfile, client: OllamaClient | None) -> Prof
             "seniority_hint": payload.get("seniority_hint", profile.seniority_hint),
         }
     )
+    LOGGER.info(
+        "Ollama profile insights ready: %s role families, %s search keywords, %s domain strengths",
+        len(insights.role_families),
+        len(insights.search_keywords),
+        len(insights.domain_strengths),
+    )
+    return insights
 
 
 def apply_insights(profile: UserProfile, insights: ProfileInsights) -> UserProfile:
