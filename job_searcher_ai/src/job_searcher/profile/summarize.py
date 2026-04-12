@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from job_searcher.llm.ollama_client import OllamaClient, OllamaClientError
+from job_searcher.logging_utils import log_timed_operation
 from job_searcher.llm.prompts import PROFILE_SUMMARY_SYSTEM, build_profile_summary_prompt
 from job_searcher.schemas import ProfileInsights, UserProfile
 from job_searcher.utils.text import unique_preserve_order
@@ -19,15 +20,17 @@ def summarize_profile(profile: UserProfile, client: OllamaClient | None) -> Prof
     if client is None:
         return _fallback_insights(profile)
 
-    LOGGER.info(
-        "Requesting profile keyword extraction from Ollama model %s",
-        client.settings.model,
-    )
     try:
-        payload = client.generate_json(
-            build_profile_summary_prompt(profile.raw_text[:8000]),
-            system=PROFILE_SUMMARY_SYSTEM,
-        )
+        with log_timed_operation(
+            LOGGER,
+            f"Profile keyword extraction via Ollama model {client.settings.model}",
+            expected_seconds=float(client.settings.timeout_seconds),
+            heartbeat_seconds=5.0,
+        ):
+            payload = client.generate_json(
+                build_profile_summary_prompt(profile.raw_text[:8000]),
+                system=PROFILE_SUMMARY_SYSTEM,
+            )
     except OllamaClientError as exc:
         LOGGER.warning("Falling back to heuristic profile insights: %s", exc)
         return _fallback_insights(profile)
@@ -43,7 +46,7 @@ def summarize_profile(profile: UserProfile, client: OllamaClient | None) -> Prof
         }
     )
     LOGGER.info(
-        "Ollama profile insights ready: %s role families, %s search keywords, %s domain strengths",
+        "Profile keyword extraction produced %s role families, %s search keywords, and %s domain strengths.",
         len(insights.role_families),
         len(insights.search_keywords),
         len(insights.domain_strengths),
