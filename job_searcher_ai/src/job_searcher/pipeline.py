@@ -55,7 +55,9 @@ class JobSearcherPipeline:
         return profile
 
     def load_profile(self) -> UserProfile:
-        return UserProfile.model_validate_json(self.artifacts.profile_structured_json.read_text(encoding='utf-8'))
+        profile = UserProfile.model_validate_json(self.artifacts.profile_structured_json.read_text(encoding='utf-8'))
+        self._ensure_profile_keyword_artifacts(profile)
+        return profile
 
     def generate_queries(self, profile: UserProfile | None = None) -> list[SearchQuery]:
         active_profile = profile or self.load_profile()
@@ -162,6 +164,11 @@ class JobSearcherPipeline:
 
     def _resolve_path(self, value: Path) -> Path:
         return value if value.is_absolute() else (self.project_root / value)
+
+    def _ensure_profile_keyword_artifacts(self, profile: UserProfile) -> None:
+        if self.artifacts.profile_keywords_json.exists() and self.artifacts.profile_keywords_md.exists():
+            return
+        self._write_profile_keyword_artifacts(profile)
 
     def _write_profile_keyword_artifacts(self, profile: UserProfile) -> None:
         payload = {
