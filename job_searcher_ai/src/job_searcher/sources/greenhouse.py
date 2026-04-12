@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from job_searcher.parsing.jobs import parse_greenhouse_job
+from job_searcher.logging_utils import ProgressLogger
 from job_searcher.schemas import SearchQuery
 from job_searcher.sources.base import BaseJobSource, SourceContext, SourceRunResult
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class GreenhouseSource(BaseJobSource):
@@ -17,11 +23,23 @@ class GreenhouseSource(BaseJobSource):
             result.notes.append("no Greenhouse boards were configured")
             return result
 
+        board_progress = ProgressLogger(
+            LOGGER,
+            "Greenhouse boards",
+            len(context.config.sources.greenhouse_boards),
+            min_interval_seconds=3.0,
+        )
         for board in context.config.sources.greenhouse_boards:
             url = f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true"
             payload = context.get_json(url)
             jobs = payload.get("jobs", []) if isinstance(payload, dict) else []
             result.raw_jobs += len(jobs)
+            job_progress = ProgressLogger(
+                LOGGER,
+                f"Greenhouse board {board}",
+                len(jobs),
+                min_interval_seconds=3.0,
+            )
             for item in jobs:
                 item.setdefault("board_token", board)
                 item.setdefault("company_name", board.replace("-", " ").title())
@@ -31,6 +49,10 @@ class GreenhouseSource(BaseJobSource):
                     result.matched_jobs += 1
                 else:
                     result.filtered_out_jobs.append(job)
+                job_progress.advance()
+            job_progress.finish()
+            board_progress.advance()
+        board_progress.finish()
 
         result.diagnostics = context.take_diagnostics()
         return result

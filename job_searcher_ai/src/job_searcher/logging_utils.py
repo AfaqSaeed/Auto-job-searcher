@@ -11,7 +11,72 @@ from pathlib import Path
 from typing import Iterator
 
 
+
 LOGGER_NAME = "job_searcher"
+
+
+class ProgressLogger:
+    """Log progress with elapsed time and a simple ETA based on observed throughput."""
+
+    def __init__(
+        self,
+        logger: logging.Logger,
+        label: str,
+        total: int,
+        *,
+        min_interval_seconds: float = 5.0,
+    ) -> None:
+        self.logger = logger
+        self.label = label
+        self.total = max(total, 0)
+        self.min_interval_seconds = min_interval_seconds
+        self.start = time.monotonic()
+        self.last_logged_at = self.start
+        self.completed = 0
+        self.logger.info("%s progress started: 0/%s done.", self.label, self.total)
+
+    def advance(self, step: int = 1) -> None:
+        if self.total <= 0:
+            return
+        self.completed = min(self.total, self.completed + step)
+        now = time.monotonic()
+        should_log = (
+            self.completed == self.total
+            or self.completed == 1
+            or now - self.last_logged_at >= self.min_interval_seconds
+        )
+        if not should_log:
+            return
+        self.last_logged_at = now
+        elapsed = max(now - self.start, 0.001)
+        rate = self.completed / elapsed
+        remaining = max(self.total - self.completed, 0)
+        eta_seconds = remaining / rate if rate > 0 else None
+        if eta_seconds is None:
+            self.logger.info(
+                "%s progress: %s/%s done after %.1fs.",
+                self.label,
+                self.completed,
+                self.total,
+                elapsed,
+            )
+            return
+        self.logger.info(
+            "%s progress: %s/%s done after %.1fs, rough ETA %.1fs.",
+            self.label,
+            self.completed,
+            self.total,
+            elapsed,
+            eta_seconds,
+        )
+
+    def finish(self) -> None:
+        if self.total <= 0:
+            self.logger.info("%s progress finished: no work items.", self.label)
+            return
+        self.completed = self.total
+        elapsed = time.monotonic() - self.start
+        self.logger.info("%s progress finished: %s/%s done in %.1fs.", self.label, self.completed, self.total, elapsed)
 
 
 @contextmanager

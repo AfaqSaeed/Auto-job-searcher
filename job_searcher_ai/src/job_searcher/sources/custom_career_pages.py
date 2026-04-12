@@ -11,6 +11,7 @@ from xml.etree import ElementTree
 from bs4 import BeautifulSoup
 
 from job_searcher.config import CustomCareerPageConfig
+from job_searcher.logging_utils import ProgressLogger
 from job_searcher.parsing.jobs import parse_static_job_page
 from job_searcher.schemas import JobListing, SearchQuery
 from job_searcher.sources.base import BaseJobSource, SourceContext, SourceRunResult
@@ -63,10 +64,12 @@ class CustomCareerPagesSource(BaseJobSource):
             result.notes.append('no custom career pages were configured')
             return result
 
+        page_progress = ProgressLogger(LOGGER, "Custom career pages", len(pages), min_interval_seconds=3.0)
         for page in pages:
             discovered = self._discover_jobs_for_page(page, context, queries)
             if not discovered:
                 result.notes.append(f"{page.name}: no candidate job detail pages were discovered")
+                page_progress.advance()
                 continue
             result.raw_jobs += len(discovered)
             result.discovered_jobs.extend(discovered)
@@ -76,6 +79,8 @@ class CustomCareerPagesSource(BaseJobSource):
                     result.matched_jobs += 1
                 else:
                     result.filtered_out_jobs.append(job)
+            page_progress.advance()
+        page_progress.finish()
         if self._filter_snapshots:
             result.debug_data['filter_snapshots'] = list(self._filter_snapshots)
         if self._site_filter_jobs:
@@ -172,13 +177,24 @@ class CustomCareerPagesSource(BaseJobSource):
         extra_raw_payload: dict | None = None,
     ) -> list[JobListing]:
         jobs: list[JobListing] = []
+        ordered_urls: list[str] = []
         seen_urls: set[str] = set()
         for url in candidate_urls:
             if url in seen_urls:
                 continue
             seen_urls.add(url)
+            ordered_urls.append(url)
+
+        progress = ProgressLogger(
+            LOGGER,
+            f"Custom page {page.name} candidate pages",
+            len(ordered_urls),
+            min_interval_seconds=3.0,
+        )
+        for url in ordered_urls:
             html = context.get_text(url)
             if not html:
+                progress.advance()
                 continue
             job = parse_static_job_page(url, html, company=page.company or page.name, source=self.name)
             job.raw_payload.update(
@@ -189,9 +205,10 @@ class CustomCareerPagesSource(BaseJobSource):
             )
             if extra_raw_payload:
                 job.raw_payload.update(extra_raw_payload)
-            if not self._looks_like_job(job, html):
-                continue
-            jobs.append(job)
+            if self._looks_like_job(job, html):
+                jobs.append(job)
+            progress.advance()
+        progress.finish()
         return jobs
 
     @staticmethod
@@ -303,6 +320,12 @@ class CustomCareerPagesSource(BaseJobSource):
                     page.name,
                     render_urls,
                 )
+                render_progress = ProgressLogger(
+                    LOGGER,
+                    f"Custom page {page.name} rendered URLs",
+                    len(render_urls),
+                    min_interval_seconds=3.0,
+                )
                 for url in render_urls:
                     LOGGER.info(
                         'custom career page %s: rendering %s',
@@ -348,6 +371,8 @@ class CustomCareerPagesSource(BaseJobSource):
                         url,
                     )
                     candidates.extend(matching_links)
+                    render_progress.advance()
+                render_progress.finish()
             finally:
                 browser.close()
         return candidates
@@ -380,6 +405,12 @@ class CustomCareerPagesSource(BaseJobSource):
             browser_page.set_default_timeout(context.config.scraping.request_timeout_seconds * 1000)
             try:
                 render_urls = self._render_urls_for_page(page)
+                render_progress = ProgressLogger(
+                    LOGGER,
+                    f"Custom page {page.name} site-filter URLs",
+                    len(render_urls),
+                    min_interval_seconds=3.0,
+                )
                 for url in render_urls:
                     browser_page.goto(url, wait_until='networkidle')
                     html = browser_page.content()
@@ -406,6 +437,12 @@ class CustomCareerPagesSource(BaseJobSource):
                             url,
                             plans[:3],
                         )
+                    plan_progress = ProgressLogger(
+                        LOGGER,
+                        f"Custom page {page.name} filter plans on {url}",
+                        len(plans),
+                        min_interval_seconds=3.0,
+                    )
                     for plan in plans:
                         browser_page.goto(url, wait_until='networkidle')
                         if page.rendered_wait_selector:
@@ -430,6 +467,10 @@ class CustomCareerPagesSource(BaseJobSource):
                             url,
                         )
                         candidates.extend(matching_links)
+                        plan_progress.advance()
+                    plan_progress.finish()
+                    render_progress.advance()
+                render_progress.finish()
             finally:
                 browser.close()
         return self._dedupe_preserve_order(candidates)

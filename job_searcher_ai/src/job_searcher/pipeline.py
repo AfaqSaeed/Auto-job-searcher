@@ -8,7 +8,7 @@ import json
 
 from job_searcher.config import AppConfig, ensure_runtime_directories, load_config, resolve_project_root
 from job_searcher.llm.ollama_client import OllamaClient
-from job_searcher.logging_utils import log_timed_operation, setup_logging
+from job_searcher.logging_utils import ProgressLogger, log_timed_operation, setup_logging
 from job_searcher.models import PipelineArtifacts
 from job_searcher.profile.extract import extract_profile
 from job_searcher.profile.ingest import read_profile_document
@@ -79,6 +79,7 @@ class JobSearcherPipeline:
             f"Job search across {len(sources)} enabled sources",
             heartbeat_seconds=15.0,
         ):
+            source_progress = ProgressLogger(self.logger, "Source search", len(sources), min_interval_seconds=3.0)
             for source in sources:
                 with log_timed_operation(
                     self.logger,
@@ -89,6 +90,8 @@ class JobSearcherPipeline:
                 self.last_source_runs.append(run)
                 self.logger.debug(run.summary())
                 jobs.extend(run.jobs)
+                source_progress.advance()
+            source_progress.finish()
         deduped = self._dedupe_jobs(jobs)
         write_json_output([job.model_dump(mode='json') for job in deduped], self.artifacts.discovered_jobs_json)
         self._write_filtered_jobs_debug()
