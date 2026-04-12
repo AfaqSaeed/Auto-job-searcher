@@ -1,5 +1,7 @@
 README.md
 pyproject.toml
+src/find_job_borads/job_borad_find.py
+src/find_job_borads/jobs_board_find_multi.py
 src/job_searcher/__init__.py
 src/job_searcher/__main__.py
 src/job_searcher/cli.py
@@ -33,6 +35,7 @@ src/job_searcher/reporting/json_export.py
 src/job_searcher/reporting/markdown_report.py
 src/job_searcher/sources/__init__.py
 src/job_searcher/sources/base.py
+src/job_searcher/sources/custom_career_pages.py
 src/job_searcher/sources/greenhouse.py
 src/job_searcher/sources/lever.py
 src/job_searcher/sources/manual_import.py
@@ -48,8 +51,11 @@ src/job_searcher_ai.egg-info/dependency_links.txt
 src/job_searcher_ai.egg-info/entry_points.txt
 src/job_searcher_ai.egg-info/requires.txt
 src/job_searcher_ai.egg-info/top_level.txt
+tests/test_custom_career_pages.py
+tests/test_filtered_jobs_debug.py
 tests/test_job_normalization.py
 tests/test_profile_extract.py
 tests/test_query_generation.py
 tests/test_report_generation.py
 tests/test_scoring.py
+tests/test_source_summary.py
