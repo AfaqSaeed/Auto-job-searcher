@@ -51,10 +51,12 @@ class CustomCareerPagesSource(BaseJobSource):
 
     def __init__(self) -> None:
         self._filter_snapshots: list[dict] = []
+        self._site_filter_jobs: list[JobListing] = []
 
     def fetch_jobs(self, queries: list[SearchQuery], context: SourceContext) -> SourceRunResult:
         context.set_active_source(self.name)
         self._filter_snapshots = []
+        self._site_filter_jobs = []
         result = SourceRunResult(source_name=self.name)
         pages = context.config.sources.custom_career_pages
         if not pages:
@@ -76,6 +78,8 @@ class CustomCareerPagesSource(BaseJobSource):
                     result.filtered_out_jobs.append(job)
         if self._filter_snapshots:
             result.debug_data['filter_snapshots'] = list(self._filter_snapshots)
+        if self._site_filter_jobs:
+            result.debug_data['site_filter_jobs'] = [job.model_dump(mode='json') for job in self._site_filter_jobs]
         result.diagnostics = context.take_diagnostics()
         return result
 
@@ -144,7 +148,13 @@ class CustomCareerPagesSource(BaseJobSource):
                     page.name,
                     filtered_urls[:5],
                 )
-            filtered_jobs = self._build_jobs_from_candidate_urls(filtered_urls, page, context)
+            filtered_jobs = self._build_jobs_from_candidate_urls(
+                filtered_urls,
+                page,
+                context,
+                extra_raw_payload={"discovery_method": "site_filter"},
+            )
+            self._site_filter_jobs = self._merge_jobs(self._site_filter_jobs, filtered_jobs)
             LOGGER.info(
                 'custom career page %s: site-filter candidate parsing produced %s jobs',
                 page.name,
@@ -159,6 +169,7 @@ class CustomCareerPagesSource(BaseJobSource):
         candidate_urls: list[str],
         page: CustomCareerPageConfig,
         context: SourceContext,
+        extra_raw_payload: dict | None = None,
     ) -> list[JobListing]:
         jobs: list[JobListing] = []
         seen_urls: set[str] = set()
@@ -176,6 +187,8 @@ class CustomCareerPagesSource(BaseJobSource):
                     'discovery_url': page.url,
                 }
             )
+            if extra_raw_payload:
+                job.raw_payload.update(extra_raw_payload)
             if not self._looks_like_job(job, html):
                 continue
             jobs.append(job)

@@ -121,11 +121,15 @@ The pipeline writes:
 
 - `outputs/profile_document.json`
 - `outputs/profile_structured.json`
+- `outputs/profile_keywords.json`
+- `outputs/profile_keywords.md`
 - `outputs/search_queries.json`
 - `outputs/discovered_jobs.json`
 - `outputs/filtered_jobs_debug.json`
 - `outputs/custom_career_pages_debug.json`
 - `outputs/custom_career_page_filters.json`
+- `outputs/site_filtered_jobs.json`
+- `outputs/site_filtered_jobs.md`
 - `outputs/jobs_ranked.json`
 - `outputs/jobs_ranked.csv`
 - `outputs/top_matches.md`
@@ -193,6 +197,7 @@ sources:
 This requires the optional browser extra plus `playwright install chromium`. The crawler will first try normal HTML and sitemap discovery, then fall back to a rendered DOM scrape when `render_javascript` is enabled.
 
 When rendered pages expose built-in filters, the source now captures them into `outputs/custom_career_page_filters.json`. Each snapshot includes detected filter field labels, inferred semantic kinds such as `country_region`, `company`, `category`, and `search_text`, plus the available options seen in the DOM. When `apply_site_filters: true` is set for a page, the source also derives a small set of generic filter plans from your config and generated queries and tries them in the rendered page before collecting result links.
+The system also writes the extracted profile keyword pack to `outputs/profile_keywords.json` and `outputs/profile_keywords.md`, plus all jobs found through site-native filtering to `outputs/site_filtered_jobs.json` and `outputs/site_filtered_jobs.md`. This keeps the LLM-informed keyword set and the site-filter matches both reviewable and reusable for later automation.
 
 
 Example for a site with a built-in search and filter system:

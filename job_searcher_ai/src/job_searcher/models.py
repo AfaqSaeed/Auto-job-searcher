@@ -109,11 +109,15 @@ class PipelineArtifacts(BaseModel):
     cache_dir: Path
     profile_document_json: Path
     profile_structured_json: Path
+    profile_keywords_json: Path
+    profile_keywords_md: Path
     search_queries_json: Path
     discovered_jobs_json: Path
     filtered_jobs_debug_json: Path
     custom_career_pages_debug_json: Path
     custom_career_page_filters_json: Path
+    site_filtered_jobs_json: Path
+    site_filtered_jobs_md: Path
     jobs_ranked_json: Path
     jobs_ranked_csv: Path
     top_matches_md: Path
@@ -129,11 +133,15 @@ class PipelineArtifacts(BaseModel):
             cache_dir=cache_path,
             profile_document_json=output_path / "profile_document.json",
             profile_structured_json=output_path / "profile_structured.json",
+            profile_keywords_json=output_path / "profile_keywords.json",
+            profile_keywords_md=output_path / "profile_keywords.md",
             search_queries_json=output_path / "search_queries.json",
             discovered_jobs_json=output_path / "discovered_jobs.json",
             filtered_jobs_debug_json=output_path / "filtered_jobs_debug.json",
             custom_career_pages_debug_json=output_path / "custom_career_pages_debug.json",
             custom_career_page_filters_json=output_path / "custom_career_page_filters.json",
+            site_filtered_jobs_json=output_path / "site_filtered_jobs.json",
+            site_filtered_jobs_md=output_path / "site_filtered_jobs.md",
             jobs_ranked_json=output_path / "jobs_ranked.json",
             jobs_ranked_csv=output_path / "jobs_ranked.csv",
             top_matches_md=output_path / "top_matches.md",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import json
 
 from job_searcher.config import AppConfig, ensure_runtime_directories, load_config, resolve_project_root
 from job_searcher.llm.ollama_client import OllamaClient
@@ -49,6 +50,7 @@ class JobSearcherPipeline:
         profile = apply_insights(extracted, summarize_profile(extracted, self.llm_client))
         write_json_output(document.model_dump(mode='json'), self.artifacts.profile_document_json)
         write_json_output(profile.model_dump(mode='json'), self.artifacts.profile_structured_json)
+        self._write_profile_keyword_artifacts(profile)
         self.logger.info('Profile ingested: %s experiences, %s projects', len(profile.work_experience), len(profile.projects))
         return profile
 
@@ -81,6 +83,7 @@ class JobSearcherPipeline:
         self._write_filtered_jobs_debug()
         self._write_custom_career_pages_debug()
         self._write_custom_career_page_filters_debug()
+        self._write_site_filtered_jobs_artifacts()
         return deduped
 
     def load_jobs(self) -> list[JobListing]:
@@ -125,6 +128,8 @@ class JobSearcherPipeline:
                 f'Filtered-out jobs debug file: {self.artifacts.filtered_jobs_debug_json.name}',
                 f'Custom career page debug file: {self.artifacts.custom_career_pages_debug_json.name}',
                 f'Custom career page filters file: {self.artifacts.custom_career_page_filters_json.name}',
+                f'Profile keyword files: {self.artifacts.profile_keywords_json.name}, {self.artifacts.profile_keywords_md.name}',
+                f'Site-filtered job files: {self.artifacts.site_filtered_jobs_json.name}, {self.artifacts.site_filtered_jobs_md.name}',
                 'LLM reasoning is optional and falls back to heuristics when Ollama is unavailable.',
                 'Embeddings are disabled by default and require the embeddings extra.',
             ],
@@ -143,6 +148,43 @@ class JobSearcherPipeline:
 
     def _resolve_path(self, value: Path) -> Path:
         return value if value.is_absolute() else (self.project_root / value)
+
+    def _write_profile_keyword_artifacts(self, profile: UserProfile) -> None:
+        payload = {
+            'summary': profile.llm_summary or profile.summary,
+            'role_families': profile.role_families,
+            'search_keywords': profile.search_keywords,
+            'domain_strengths': profile.domain_strengths,
+            'industries': profile.industries,
+            'skills': [skill.name for skill in profile.skills],
+            'tools': profile.tools,
+            'programming_languages': profile.programming_languages,
+            'research_topics': profile.research_topics,
+            'locations': profile.locations,
+        }
+        write_json_output(payload, self.artifacts.profile_keywords_json)
+        sections = [
+            ('Summary', [payload['summary']] if payload['summary'] else []),
+            ('Role Families', payload['role_families']),
+            ('Search Keywords', payload['search_keywords']),
+            ('Domain Strengths', payload['domain_strengths']),
+            ('Industries', payload['industries']),
+            ('Skills', payload['skills']),
+            ('Tools', payload['tools']),
+            ('Programming Languages', payload['programming_languages']),
+            ('Research Topics', payload['research_topics']),
+            ('Locations', payload['locations']),
+        ]
+        lines = ['# Profile Keyword Pack', '']
+        for title, values in sections:
+            if not values:
+                continue
+            lines.append(f'## {title}')
+            lines.append('')
+            for value in values:
+                lines.append(f'- {value}')
+            lines.append('')
+        self.artifacts.profile_keywords_md.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
 
     def _write_filtered_jobs_debug(self) -> None:
         payload = [run.filtered_debug_payload() for run in self.last_source_runs if run.filtered_out_jobs]
@@ -166,6 +208,35 @@ class JobSearcherPipeline:
             if run.source_name == 'custom_career_pages' and run.debug_data.get('filter_snapshots')
         ]
         write_json_output(payload, self.artifacts.custom_career_page_filters_json)
+
+    def _write_site_filtered_jobs_artifacts(self) -> None:
+        jobs_payload: list[dict] = []
+        for run in self.last_source_runs:
+            if run.source_name != 'custom_career_pages':
+                continue
+            jobs_payload.extend(run.debug_data.get('site_filter_jobs', []))
+        write_json_output(jobs_payload, self.artifacts.site_filtered_jobs_json)
+
+        lines = ['# Site-Filtered Job Matches', '']
+        if not jobs_payload:
+            lines.append('No site-filtered jobs were captured in this run.')
+        else:
+            for job in jobs_payload:
+                title = job.get('title', 'Unknown title')
+                company = job.get('company', 'Unknown company')
+                location = job.get('location') or 'Unknown location'
+                url = job.get('source_url') or job.get('application_url') or ''
+                lines.append(f'## {title} @ {company}')
+                lines.append('')
+                lines.append(f'- Location: {location}')
+                lines.append(f'- Source: {job.get("source", "custom_career_pages")}')
+                if url:
+                    lines.append(f'- URL: {url}')
+                discovery_method = (job.get('raw_payload') or {}).get('discovery_method')
+                if discovery_method:
+                    lines.append(f'- Discovery method: {discovery_method}')
+                lines.append('')
+        self.artifacts.site_filtered_jobs_md.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
 
     @staticmethod
     def _dedupe_jobs(jobs: list[JobListing]) -> list[JobListing]:

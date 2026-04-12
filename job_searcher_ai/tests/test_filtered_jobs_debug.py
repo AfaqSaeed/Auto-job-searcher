@@ -13,6 +13,10 @@ def test_pipeline_artifacts_include_filtered_jobs_debug() -> None:
     assert artifacts.filtered_jobs_debug_json.name == 'filtered_jobs_debug.json'
     assert artifacts.custom_career_pages_debug_json.name == 'custom_career_pages_debug.json'
     assert artifacts.custom_career_page_filters_json.name == 'custom_career_page_filters.json'
+    assert artifacts.profile_keywords_json.name == 'profile_keywords.json'
+    assert artifacts.profile_keywords_md.name == 'profile_keywords.md'
+    assert artifacts.site_filtered_jobs_json.name == 'site_filtered_jobs.json'
+    assert artifacts.site_filtered_jobs_md.name == 'site_filtered_jobs.md'
 
 
 def test_source_run_result_debug_payload_includes_filtered_jobs() -> None:
