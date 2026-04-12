@@ -13,6 +13,7 @@ from typing import Iterator
 
 
 LOGGER_NAME = "job_searcher"
+SPINNER_FRAMES = ("|", "/", "-", "\\")
 
 
 class _ConsoleProgressDisplay:
@@ -21,6 +22,7 @@ class _ConsoleProgressDisplay:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._active_length = 0
+        self._spinner_index = 0
 
     @staticmethod
     def _is_interactive() -> bool:
@@ -33,11 +35,13 @@ class _ConsoleProgressDisplay:
         if not self._is_interactive():
             return False
         with self._lock:
-            padded = message
-            if self._active_length > len(message):
-                padded = message + (' ' * (self._active_length - len(message)))
-            self._active_length = len(message)
-            sys.stderr.write('\r' + padded)
+            spinner = SPINNER_FRAMES[self._spinner_index % len(SPINNER_FRAMES)]
+            self._spinner_index += 1
+            rendered = f"{spinner} {message}"
+            if self._active_length > len(rendered):
+                rendered = rendered + (" " * (self._active_length - len(rendered)))
+            self._active_length = len(rendered)
+            sys.stderr.write("\r" + rendered)
             sys.stderr.flush()
         return True
 
@@ -46,10 +50,9 @@ class _ConsoleProgressDisplay:
             return
         with self._lock:
             if self._active_length:
-                sys.stderr.write('\r' + (' ' * self._active_length) + '\r')
+                sys.stderr.write("\r" + (" " * self._active_length) + "\r")
                 sys.stderr.flush()
                 self._active_length = 0
-
 
 
 CONSOLE_PROGRESS = _ConsoleProgressDisplay()
@@ -75,7 +78,7 @@ class ProgressLogger:
         min_interval_seconds: float = 5.0,
     ) -> None:
         self.logger = logger
-        self.label = label
+        self.label = _short_label(label)
         self.total = max(total, 0)
         self.min_interval_seconds = min_interval_seconds
         self.start = time.monotonic()
@@ -124,7 +127,7 @@ class ProgressLogger:
     def finish(self) -> None:
         elapsed = time.monotonic() - self.start
         self.completed = self.total
-        if CONSOLE_PROGRESS.update(self._format_message(elapsed, 0.0) + " | done"):
+        if CONSOLE_PROGRESS.update(self._format_message(elapsed, 0.0) + " done"):
             return
         if self.total <= 0:
             self.logger.info("%s progress finished: no work items.", self.label)
@@ -133,12 +136,12 @@ class ProgressLogger:
 
     def _format_message(self, elapsed: float, eta_seconds: float | None) -> str:
         if self.total <= 0:
-            return f"{self.label} | no work items | {elapsed:.1f}s elapsed"
-        width = 20
+            return f"{self.label} | no work | {elapsed:.1f}s"
+        width = 16
         filled = int((self.completed / self.total) * width) if self.total else 0
-        bar = '[' + ('=' * filled) + (' ' * (width - filled)) + ']'
-        eta_text = f"ETA {eta_seconds:.1f}s" if eta_seconds is not None else "ETA --"
-        return f"{bar} {self.label} | {self.completed}/{self.total} | {elapsed:.1f}s elapsed | {eta_text}"
+        bar = "[" + ("=" * filled) + (" " * (width - filled)) + "]"
+        eta_text = f"eta {eta_seconds:.0f}s" if eta_seconds is not None else "eta --"
+        return f"{bar} {self.label} {self.completed}/{self.total} {elapsed:.1f}s {eta_text}"
 
 
 @contextmanager
@@ -154,42 +157,43 @@ def log_timed_operation(
     start = time.monotonic()
     stop_event = threading.Event()
     error: BaseException | None = None
+    short_label = _short_label(label)
 
     def _render(elapsed: float) -> str:
         if expected_seconds is None:
-            return f"[running] {label} | {elapsed:.1f}s elapsed | ETA variable"
+            return f"{short_label} {elapsed:.1f}s eta var"
         if elapsed <= expected_seconds:
-            return f"[running] {label} | {elapsed:.1f}s elapsed | ceiling {expected_seconds:.0f}s"
-        return f"[running] {label} | {elapsed:.1f}s elapsed | past ceiling {expected_seconds:.0f}s"
+            return f"{short_label} {elapsed:.1f}s cap {expected_seconds:.0f}s"
+        return f"{short_label} {elapsed:.1f}s past {expected_seconds:.0f}s"
 
     if not CONSOLE_PROGRESS.update(_render(0.0)):
         expectation_note = (
             f" Rough timeout/expected ceiling: {expected_seconds:.0f}s." if expected_seconds else " ETA is variable."
         )
-        logger.info("%s started.%s", label, expectation_note)
+        logger.info("%s started.%s", short_label, expectation_note)
 
     def _heartbeat() -> None:
         while not stop_event.wait(heartbeat_seconds):
             elapsed = time.monotonic() - start
             if not CONSOLE_PROGRESS.update(_render(elapsed)):
                 if expected_seconds is None:
-                    logger.info("%s still running after %.1fs.", label, elapsed)
+                    logger.info("%s still running after %.1fs.", short_label, elapsed)
                 elif elapsed <= expected_seconds:
                     logger.info(
                         "%s still running after %.1fs (configured ceiling about %.0fs).",
-                        label,
+                        short_label,
                         elapsed,
                         expected_seconds,
                     )
                 else:
                     logger.info(
                         "%s still running after %.1fs (past configured ceiling of about %.0fs).",
-                        label,
+                        short_label,
                         elapsed,
                         expected_seconds,
                     )
 
-    heartbeat_thread = threading.Thread(target=_heartbeat, name=f"timer:{label}", daemon=True)
+    heartbeat_thread = threading.Thread(target=_heartbeat, name=f"timer:{short_label}", daemon=True)
     heartbeat_thread.start()
     try:
         yield
@@ -200,22 +204,35 @@ def log_timed_operation(
         stop_event.set()
         heartbeat_thread.join(timeout=0.2)
         elapsed = time.monotonic() - start
-        updated_console = CONSOLE_PROGRESS.update(f"[done] {label} | {elapsed:.1f}s elapsed")
+        updated_console = CONSOLE_PROGRESS.update(f"{short_label} {elapsed:.1f}s done")
         if not updated_console:
             if error is None:
-                logger.info("%s finished in %.1fs.", label, elapsed)
+                logger.info("%s finished in %.1fs.", short_label, elapsed)
             else:
-                logger.warning("%s failed after %.1fs.", label, elapsed)
+                logger.warning("%s failed after %.1fs.", short_label, elapsed)
+
+
+def _short_label(label: str, max_length: int = 52) -> str:
+    compact = " ".join(label.split())
+    if len(compact) <= max_length:
+        return compact
+    return compact[: max_length - 3].rstrip() + "..."
 
 
 def setup_logging(level: str | None = None, log_file: Path | None = None) -> logging.Logger:
     """Configure process-wide logging once and return the package logger."""
 
     resolved_level = getattr(logging, (level or os.getenv("JOB_SEARCHER_LOG_LEVEL", "INFO")).upper(), logging.INFO)
-    handlers: list[logging.Handler] = [ProgressAwareStreamHandler()]
+
+    console_handler = ProgressAwareStreamHandler()
+    console_handler.setLevel(logging.WARNING)
+
+    handlers: list[logging.Handler] = [console_handler]
     if log_file is not None:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(resolved_level)
+        handlers.append(file_handler)
 
     logging.basicConfig(
         level=resolved_level,
