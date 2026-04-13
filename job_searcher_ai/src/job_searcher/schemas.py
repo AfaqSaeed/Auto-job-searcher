@@ -175,12 +175,22 @@ class RankedJob(BaseModel):
     score: JobScore
 
 
+class SearchSourceStats(BaseModel):
+    source_name: str
+    raw_jobs_discovered: int = 0
+    jobs_matched: int = 0
+    jobs_filtered_out: int = 0
+
+
 class SearchReport(BaseModel):
     generated_at: datetime = Field(default_factory=datetime.utcnow)
     profile_summary: str = ""
     sources_searched: list[str] = Field(default_factory=list)
     queries: list[SearchQuery] = Field(default_factory=list)
+    total_jobs_raw_discovered: int = 0
+    total_jobs_filtered_out: int = 0
     total_jobs_discovered: int = 0
     total_jobs_ranked: int = 0
+    source_stats: list[SearchSourceStats] = Field(default_factory=list)
     top_jobs: list[RankedJob] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)

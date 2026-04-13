@@ -19,7 +19,7 @@ from job_searcher.ranking.fusion import rank_jobs as fuse_ranked_jobs
 from job_searcher.reporting.csv_export import export_ranked_jobs_csv
 from job_searcher.reporting.json_export import write_json_output
 from job_searcher.reporting.markdown_report import build_search_report_markdown, build_top_matches_markdown
-from job_searcher.schemas import JobListing, RankedJob, SearchQuery, SearchReport, UserProfile
+from job_searcher.schemas import JobListing, RankedJob, SearchQuery, SearchReport, SearchSourceStats, UserProfile
 from job_searcher.sources import build_enabled_sources
 from job_searcher.sources.base import SourceContext, SourceRunResult
 from job_searcher.utils.cache import JsonCache
@@ -153,13 +153,17 @@ class JobSearcherPipeline:
         active_profile = profile or self.load_profile()
         active_queries = queries or self.load_queries()
         active_ranked_jobs = ranked_jobs or self.load_ranked_jobs()
+        source_stats = self._build_report_source_stats()
         source_notes = [run.summary() for run in self.last_source_runs] if self.last_source_runs else []
         report = SearchReport(
             profile_summary=active_profile.summary or active_profile.llm_summary or '',
             sources_searched=[source.name for source in build_enabled_sources(self.config, self.project_root)],
             queries=active_queries,
+            total_jobs_raw_discovered=sum(item.raw_jobs_discovered for item in source_stats),
+            total_jobs_filtered_out=sum(item.jobs_filtered_out for item in source_stats),
             total_jobs_discovered=len(self.load_jobs()) if self.artifacts.discovered_jobs_json.exists() else len(active_ranked_jobs),
             total_jobs_ranked=len(active_ranked_jobs),
+            source_stats=source_stats,
             top_jobs=active_ranked_jobs[: self.config.outputs.top_n_markdown],
             notes=source_notes + [
                 f'Filtered-out jobs debug file: {self.artifacts.filtered_jobs_debug_json.name}',
@@ -280,6 +284,44 @@ class JobSearcherPipeline:
                     lines.append(f'- Discovery method: {discovery_method}')
                 lines.append('')
         self.artifacts.site_filtered_jobs_md.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
+
+    def _build_report_source_stats(self) -> list[SearchSourceStats]:
+        if self.last_source_runs:
+            return [
+                SearchSourceStats(
+                    source_name=run.source_name,
+                    raw_jobs_discovered=run.raw_jobs,
+                    jobs_matched=run.matched_jobs,
+                    jobs_filtered_out=len(run.filtered_out_jobs),
+                )
+                for run in self.last_source_runs
+            ]
+
+        by_source: dict[str, SearchSourceStats] = {}
+        if self.artifacts.filtered_jobs_debug_json.exists():
+            payload = self.cache.read_json(self.artifacts.filtered_jobs_debug_json)
+            for item in payload:
+                source_name = item.get('source_name')
+                if not source_name:
+                    continue
+                by_source[source_name] = SearchSourceStats(
+                    source_name=source_name,
+                    raw_jobs_discovered=int(item.get('raw_jobs', 0) or 0),
+                    jobs_matched=int(item.get('matched_jobs', 0) or 0),
+                    jobs_filtered_out=int(item.get('filtered_out_count', 0) or 0),
+                )
+        if self.artifacts.custom_career_pages_debug_json.exists():
+            payload = self.cache.read_json(self.artifacts.custom_career_pages_debug_json)
+            for item in payload:
+                source_name = item.get('source_name')
+                if not source_name:
+                    continue
+                stats = by_source.get(source_name, SearchSourceStats(source_name=source_name))
+                stats.raw_jobs_discovered = max(stats.raw_jobs_discovered, int(item.get('raw_jobs', 0) or 0))
+                stats.jobs_matched = max(stats.jobs_matched, int(item.get('matched_jobs', 0) or 0))
+                stats.jobs_filtered_out = max(stats.jobs_filtered_out, int(item.get('filtered_out_count', 0) or 0))
+                by_source[source_name] = stats
+        return list(by_source.values())
 
     @staticmethod
     def _dedupe_jobs(jobs: list[JobListing]) -> list[JobListing]:

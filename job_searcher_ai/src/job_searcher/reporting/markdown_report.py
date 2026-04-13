@@ -37,7 +37,9 @@ def build_search_report_markdown(report: SearchReport) -> str:
         f"- Generated at: {report.generated_at.isoformat()}",
         f"- Sources searched: {', '.join(report.sources_searched) or 'None'}",
         f"- Queries generated: {len(report.queries)}",
-        f"- Jobs discovered: {report.total_jobs_discovered}",
+        f"- Raw jobs discovered: {report.total_jobs_raw_discovered}",
+        f"- Jobs filtered out: {report.total_jobs_filtered_out}",
+        f"- Jobs matched after filtering: {report.total_jobs_discovered}",
         f"- Jobs ranked: {report.total_jobs_ranked}",
         "",
         "## Profile Summary",
@@ -47,6 +49,12 @@ def build_search_report_markdown(report: SearchReport) -> str:
     ]
     for query in report.queries[:15]:
         lines.append(f"- {query.text} ({query.rationale or 'generated'})")
+    if report.source_stats:
+        lines.extend(["", "## Source Stats"])
+        for stats in report.source_stats:
+            lines.append(
+                f"- {stats.source_name}: raw {stats.raw_jobs_discovered}, filtered {stats.jobs_filtered_out}, matched {stats.jobs_matched}"
+            )
     lines.extend(["", "## Top Jobs"])
     for item in report.top_jobs[:10]:
         lines.append(f"- {item.listing.title} @ {item.listing.company}: {item.score.overall_score} [{item.score.disposition.value}]")
