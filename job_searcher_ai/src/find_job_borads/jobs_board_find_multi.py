@@ -169,20 +169,8 @@ def resolve_input_path(project_root: Path, value: Path) -> Path:
     return value if value.is_absolute() else (project_root / value)
 
 
-def load_profile_keywords(
-    project_root: Path,
-    profile_path: Path,
-    supplemental_files: list[Path],
-    config_path: Path | None,
-) -> tuple[UserProfile, AppConfig, list[str], list[str]]:
-    config = load_config(config_path=config_path, project_root=project_root)
-    document = read_profile_document(
-        resolve_input_path(project_root, profile_path),
-        [resolve_input_path(project_root, path) for path in supplemental_files],
-    )
-    extracted = extract_profile(document)
-    client = OllamaClient(config.ollama) if config.ollama.enabled else None
-    profile = apply_insights(extracted, summarize_profile(extracted, client))
+def derive_profile_keywords_and_regions(profile: UserProfile, config: AppConfig) -> tuple[list[str], list[str]]:
+    """Build keyword and region lists from an already-structured profile."""
 
     keyword_candidates = (
         profile.role_families
@@ -202,7 +190,24 @@ def load_profile_keywords(
     )
     if not regions:
         regions = ["Germany", "Europe"]
+    return keywords, regions
 
+
+def load_profile_keywords(
+    project_root: Path,
+    profile_path: Path,
+    supplemental_files: list[Path],
+    config_path: Path | None,
+) -> tuple[UserProfile, AppConfig, list[str], list[str]]:
+    config = load_config(config_path=config_path, project_root=project_root)
+    document = read_profile_document(
+        resolve_input_path(project_root, profile_path),
+        [resolve_input_path(project_root, path) for path in supplemental_files],
+    )
+    extracted = extract_profile(document)
+    client = OllamaClient(config.ollama) if config.ollama.enabled else None
+    profile = apply_insights(extracted, summarize_profile(extracted, client))
+    keywords, regions = derive_profile_keywords_and_regions(profile, config)
     return profile, config, keywords, regions
 
 
@@ -541,6 +546,30 @@ def save_outputs(df: pd.DataFrame, metadata: dict[str, Any], output_dir: Path) -
 
     metadata_json.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
     LOGGER.info("Saved %s", metadata_json)
+
+
+def run_board_discovery(
+    project_root: Path,
+    profile: UserProfile,
+    config: AppConfig,
+    output_dir: Path,
+    *,
+    max_search_results_per_query: int = 15,
+    max_workers: int = 10,
+) -> dict[str, Any]:
+    """Run board discovery from an already-loaded profile and save outputs."""
+
+    keywords, regions = derive_profile_keywords_and_regions(profile, config)
+    dataframe, metadata = discover_companies(
+        profile=profile,
+        config=config,
+        keywords=keywords,
+        regions=regions,
+        max_search_results_per_query=max_search_results_per_query,
+        max_workers=max_workers,
+    )
+    save_outputs(dataframe, metadata, output_dir if output_dir.is_absolute() else (project_root / output_dir))
+    return metadata
 
 
 def main(argv: list[str] | None = None) -> int:

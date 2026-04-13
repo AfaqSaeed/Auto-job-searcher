@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 import json
 
+from find_job_borads.jobs_board_find_multi import run_board_discovery
 from job_searcher.config import AppConfig, ensure_runtime_directories, load_config, resolve_project_root
 from job_searcher.llm.ollama_client import OllamaClient
 from job_searcher.logging_utils import ProgressLogger, log_timed_operation, setup_logging
@@ -65,6 +66,26 @@ class JobSearcherPipeline:
         write_json_output([query.model_dump(mode='json') for query in queries], self.artifacts.search_queries_json)
         self.logger.info('Generated %s search queries', len(queries))
         return queries
+
+    def discover_job_boards(self, profile: UserProfile | None = None) -> dict:
+        active_profile = profile or self.load_profile()
+        with log_timed_operation(
+            self.logger,
+            'Job board discovery',
+            heartbeat_seconds=15.0,
+        ):
+            metadata = run_board_discovery(
+                project_root=self.project_root,
+                profile=active_profile,
+                config=self.config,
+                output_dir=self.artifacts.output_dir,
+            )
+        self.logger.info(
+            'Job board discovery completed: %s queries, %s candidate companies',
+            len(metadata.get('queries_used', [])),
+            metadata.get('candidate_company_count', 0),
+        )
+        return metadata
 
     def load_queries(self) -> list[SearchQuery]:
         payload = self.cache.read_json(self.artifacts.search_queries_json)
@@ -157,6 +178,7 @@ class JobSearcherPipeline:
 
     def run_all(self, input_path: Path, supplemental_files: list[Path] | None = None) -> SearchReport:
         profile = self.ingest_profile(input_path, supplemental_files=supplemental_files)
+        self.discover_job_boards(profile)
         queries = self.generate_queries(profile)
         jobs = self.search_jobs(queries)
         ranked = self.rank_jobs(profile, jobs)

@@ -20,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--resume", type=Path, nargs="*", default=[], help="Optional supplemental resume files")
 
     subparsers.add_parser("generate-queries", help="Generate job-search queries from the profile")
+    subparsers.add_parser("discover-boards", help="Discover relevant companies and Greenhouse boards from the profile")
     subparsers.add_parser("search-jobs", help="Fetch jobs from enabled sources")
     subparsers.add_parser("rank-jobs", help="Rank discovered jobs against the profile")
     subparsers.add_parser("report", help="Render markdown and JSON reports")
@@ -39,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
         pipeline.ingest_profile(args.input, supplemental_files=args.resume)
     elif args.command == "generate-queries":
         pipeline.generate_queries()
+    elif args.command == "discover-boards":
+        pipeline.discover_job_boards()
     elif args.command == "search-jobs":
         pipeline.search_jobs()
     elif args.command == "rank-jobs":
