@@ -23,16 +23,17 @@ def assess_job_with_llm(
     except OllamaClientError:
         return _heuristic_assessment(job, rules_score, missing_skills)
 
+    normalized_payload = {
+        "fit_label": _coerce_string(payload.get("fit_label")) or _heuristic_fit_label(rules_score),
+        "why_match": _coerce_string(payload.get("why_match")) or f"Potential fit for {job.title}.",
+        "missing_requirements": _coerce_list(payload.get("missing_requirements")) or missing_skills,
+        "recommended_resume_emphasis": _coerce_string(payload.get("recommended_resume_emphasis"))
+        or f"Highlight overlap with {', '.join(job.required_skills[:3]) or job.title}.",
+        "recommended_cover_letter_angle": _coerce_string(payload.get("recommended_cover_letter_angle"))
+        or f"Explain why your background maps to {job.company}'s needs.",
+    }
     return LLMAssessment.model_validate(
-        {
-            "fit_label": payload.get("fit_label") or _heuristic_fit_label(rules_score),
-            "why_match": payload.get("why_match") or f"Potential fit for {job.title}.",
-            "missing_requirements": payload.get("missing_requirements") or missing_skills,
-            "recommended_resume_emphasis": payload.get("recommended_resume_emphasis")
-            or f"Highlight overlap with {', '.join(job.required_skills[:3]) or job.title}.",
-            "recommended_cover_letter_angle": payload.get("recommended_cover_letter_angle")
-            or f"Explain why your background maps to {job.company}'s needs.",
-        }
+        normalized_payload
     )
 
 
@@ -52,3 +53,26 @@ def _heuristic_fit_label(rules_score: float) -> str:
     if rules_score >= 55:
         return "stretch"
     return "poor_fit"
+
+
+def _coerce_string(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return "; ".join(parts)
+    return str(value).strip()
+
+
+def _coerce_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return [cleaned] if cleaned else []
+    coerced = str(value).strip()
+    return [coerced] if coerced else []
