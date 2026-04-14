@@ -43,11 +43,7 @@ class LeverSource(BaseJobSource):
             for item in jobs:
                 item.setdefault("company", board.replace("-", " ").title())
                 job = parse_lever_job(item)
-                if self.matches_queries(job, queries):
-                    result.jobs.append(job)
-                    result.matched_jobs += 1
-                else:
-                    result.filtered_out_jobs.append(job)
+                self.apply_query_filter(result, job, queries)
                 job_progress.advance()
             job_progress.finish()
             board_progress.advance()

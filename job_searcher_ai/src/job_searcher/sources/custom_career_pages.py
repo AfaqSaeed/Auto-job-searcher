@@ -74,11 +74,7 @@ class CustomCareerPagesSource(BaseJobSource):
             result.raw_jobs += len(discovered)
             result.discovered_jobs.extend(discovered)
             for job in discovered:
-                if self.matches_queries(job, queries):
-                    result.jobs.append(job)
-                    result.matched_jobs += 1
-                else:
-                    result.filtered_out_jobs.append(job)
+                self.apply_query_filter(result, job, queries)
             page_progress.advance()
         page_progress.finish()
         if self._filter_snapshots:

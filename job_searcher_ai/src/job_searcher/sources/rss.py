@@ -51,11 +51,7 @@ class RSSSource(BaseJobSource):
                         raw_payload={'feed_url': feed_url},
                     )
                 )
-                if self.matches_queries(job, queries):
-                    result.jobs.append(job)
-                    result.matched_jobs += 1
-                else:
-                    result.filtered_out_jobs.append(job)
+                self.apply_query_filter(result, job, queries)
 
         result.diagnostics = context.take_diagnostics()
         return result

@@ -39,22 +39,32 @@ class ManualImportSource(BaseJobSource):
             result.raw_jobs += loaded[0]
             result.jobs.extend(loaded[1])
             result.filtered_out_jobs.extend(loaded[2])
+            result.filtered_out_details.extend(loaded[3])
             result.matched_jobs += len(loaded[1])
 
         result.diagnostics = context.take_diagnostics()
         return result
 
-    def _load_json(self, path: Path, queries: list[SearchQuery]) -> tuple[int, list[JobListing], list[JobListing]]:
+    def _load_json(self, path: Path, queries: list[SearchQuery]) -> tuple[int, list[JobListing], list[JobListing], list[dict]]:
         payload = json.loads(path.read_text(encoding="utf-8"))
         records = payload if isinstance(payload, list) else [payload]
         jobs = [normalize_job_listing(JobListing.model_validate(record)) for record in records]
-        matched = [job for job in jobs if self.matches_queries(job, queries)]
-        filtered_out = [job for job in jobs if not self.matches_queries(job, queries)]
-        return len(jobs), matched, filtered_out
+        matched: list[JobListing] = []
+        filtered_out: list[JobListing] = []
+        filtered_details: list[dict] = []
+        for job in jobs:
+            evaluation = self.evaluate_query_match(job, queries)
+            if evaluation["matched"]:
+                matched.append(job)
+            else:
+                filtered_out.append(job)
+                filtered_details.append({"listing": job.model_dump(mode="json"), "query_match": evaluation})
+        return len(jobs), matched, filtered_out, filtered_details
 
-    def _load_csv(self, path: Path, queries: list[SearchQuery]) -> tuple[int, list[JobListing], list[JobListing]]:
+    def _load_csv(self, path: Path, queries: list[SearchQuery]) -> tuple[int, list[JobListing], list[JobListing], list[dict]]:
         matched_jobs: list[JobListing] = []
         filtered_out_jobs: list[JobListing] = []
+        filtered_details: list[dict] = []
         raw_count = 0
         with path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -78,11 +88,13 @@ class ManualImportSource(BaseJobSource):
                     "date_posted": row.get("date_posted"),
                 }
                 job = normalize_job_listing(JobListing.model_validate(record))
-                if self.matches_queries(job, queries):
+                evaluation = self.evaluate_query_match(job, queries)
+                if evaluation["matched"]:
                     matched_jobs.append(job)
                 else:
                     filtered_out_jobs.append(job)
-        return raw_count, matched_jobs, filtered_out_jobs
+                    filtered_details.append({"listing": job.model_dump(mode="json"), "query_match": evaluation})
+        return raw_count, matched_jobs, filtered_out_jobs, filtered_details
 
 
 def _split_pipe(value: str | None) -> list[str]:

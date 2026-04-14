@@ -13,7 +13,7 @@ import requests
 from job_searcher.config import AppConfig
 from job_searcher.schemas import JobListing, SearchQuery
 from job_searcher.utils.cache import JsonCache
-from job_searcher.utils.text import jaccard_similarity, normalize_text
+from job_searcher.utils.text import jaccard_similarity, normalize_text, tokenise
 from job_searcher.utils.urls import is_allowed_by_robots
 
 
@@ -33,6 +33,7 @@ class SourceRunResult:
     source_name: str
     jobs: list[JobListing] = field(default_factory=list)
     filtered_out_jobs: list[JobListing] = field(default_factory=list)
+    filtered_out_details: list[dict[str, Any]] = field(default_factory=list)
     discovered_jobs: list[JobListing] = field(default_factory=list)
     raw_jobs: int = 0
     matched_jobs: int = 0
@@ -93,7 +94,8 @@ class SourceRunResult:
             "matched_jobs": self.matched_jobs,
             "filtered_out_count": len(self.filtered_out_jobs),
             "summary": self.summary(),
-            "filtered_out_jobs": [job.model_dump(mode="json") for job in self.filtered_out_jobs],
+            "filtered_out_jobs": self.filtered_out_details
+            or [job.model_dump(mode="json") for job in self.filtered_out_jobs],
         }
 
     def discovered_debug_payload(self) -> dict:
@@ -194,13 +196,111 @@ class BaseJobSource(ABC):
         """Fetch jobs for this source."""
 
     @staticmethod
+    def evaluate_query_match(job: JobListing, queries: list[SearchQuery]) -> dict[str, Any]:
+        """Return a scored query-match evaluation for this job."""
+
+        title_text = normalize_text(job.title)
+        company_text = normalize_text(job.company)
+        location_text = normalize_text(job.location or "")
+        domain_text = normalize_text(" ".join(job.domain_signals))
+        skills_text = normalize_text(" ".join(job.required_skills + job.preferred_skills))
+        description_text = normalize_text(job.description)
+        full_text = normalize_text(
+            " ".join(
+                [
+                    job.title,
+                    job.company,
+                    job.location or "",
+                    " ".join(job.domain_signals),
+                    " ".join(job.required_skills + job.preferred_skills),
+                    job.description,
+                ]
+            )
+        )
+
+        if not queries:
+            return {
+                "matched": True,
+                "best_query": None,
+                "best_query_score": 100.0,
+                "best_query_similarity": 1.0,
+                "best_query_title_score": 100.0,
+                "best_query_domain_score": 100.0,
+                "best_query_location_score": 100.0,
+                "best_query_term_overlap": 1.0,
+                "decision_reason": "no queries configured",
+            }
+
+        best: dict[str, Any] | None = None
+        for query in queries:
+            query_text = normalize_text(query.text)
+            query_terms = query.terms or tokenise(query.text)
+            query_term_set = set(query_terms)
+            title_score = 1.0 if query.title and normalize_text(query.title) in title_text else 0.0
+            location_score = 1.0 if query.location and normalize_text(query.location) in location_text else 0.0
+            domain_hits = sum(
+                1 for term in query_terms if term in domain_text or term in title_text or term in skills_text
+            )
+            domain_score = domain_hits / max(len(query_term_set), 1)
+            text_similarity = jaccard_similarity(query.text, full_text)
+            overlap_count = sum(1 for term in query_term_set if term in full_text)
+            term_overlap = overlap_count / max(len(query_term_set), 1)
+            substring_bonus = 1.0 if query_text and query_text in full_text else 0.0
+
+            score = (
+                title_score * 0.35
+                + domain_score * 0.25
+                + location_score * 0.10
+                + term_overlap * 0.20
+                + text_similarity * 0.10
+                + substring_bonus * 0.10
+            )
+            candidate = {
+                "matched": score >= 0.32 or (title_score >= 1.0 and term_overlap >= 0.20) or term_overlap >= 0.45,
+                "best_query": query.text,
+                "best_query_score": round(score * 100.0, 2),
+                "best_query_similarity": round(text_similarity, 4),
+                "best_query_title_score": round(title_score, 4),
+                "best_query_domain_score": round(domain_score, 4),
+                "best_query_location_score": round(location_score, 4),
+                "best_query_term_overlap": round(term_overlap, 4),
+                "decision_reason": "passed threshold" if score >= 0.32 else "below threshold",
+            }
+            if best is None or candidate["best_query_score"] > best["best_query_score"]:
+                best = candidate
+
+        return best or {
+            "matched": False,
+            "best_query": None,
+            "best_query_score": 0.0,
+            "best_query_similarity": 0.0,
+            "best_query_title_score": 0.0,
+            "best_query_domain_score": 0.0,
+            "best_query_location_score": 0.0,
+            "best_query_term_overlap": 0.0,
+            "decision_reason": "no match candidates",
+        }
+
+    @classmethod
     def matches_queries(job: JobListing, queries: list[SearchQuery]) -> bool:
         """Filter source results using generated search queries."""
 
-        if not queries:
-            return True
-        job_text = normalize_text(" ".join([job.title, job.company, job.location or "", job.description]))
-        return any(
-            normalize_text(query.text) in job_text or jaccard_similarity(query.text, job_text) >= 0.18
-            for query in queries
+        return bool(cls.evaluate_query_match(job, queries).get("matched"))
+
+    @classmethod
+    def apply_query_filter(cls, result: SourceRunResult, job: JobListing, queries: list[SearchQuery]) -> None:
+        """Apply query matching and capture filtered-job debug stats."""
+
+        evaluation = cls.evaluate_query_match(job, queries)
+        if evaluation["matched"]:
+            result.jobs.append(job)
+            result.matched_jobs += 1
+            return
+
+        result.filtered_out_jobs.append(job)
+        result.filtered_out_details.append(
+            {
+                "listing": job.model_dump(mode="json"),
+                "query_match": evaluation,
+            }
         )

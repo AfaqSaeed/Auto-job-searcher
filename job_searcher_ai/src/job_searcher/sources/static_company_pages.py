@@ -32,11 +32,7 @@ class StaticCompanyPagesSource(BaseJobSource):
             if not page.job_card_selector:
                 result.raw_jobs += 1
                 job = parse_static_job_page(page.url, html, company=page.company)
-                if self.matches_queries(job, queries):
-                    result.jobs.append(job)
-                    result.matched_jobs += 1
-                else:
-                    result.filtered_out_jobs.append(job)
+                self.apply_query_filter(result, job, queries)
                 continue
 
             soup = BeautifulSoup(html, 'html.parser')
@@ -50,11 +46,7 @@ class StaticCompanyPagesSource(BaseJobSource):
                 job = parse_static_job_page(link, detail_html, company=page.company)
                 if title_node and job.title == 'Unknown title':
                     job.title = title_node.get_text(' ', strip=True)
-                if self.matches_queries(job, queries):
-                    result.jobs.append(job)
-                    result.matched_jobs += 1
-                else:
-                    result.filtered_out_jobs.append(job)
+                self.apply_query_filter(result, job, queries)
 
         result.diagnostics = context.take_diagnostics()
         return result
