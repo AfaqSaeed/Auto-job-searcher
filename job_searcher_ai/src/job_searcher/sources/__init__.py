@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from job_searcher.config import AppConfig
+from job_searcher.sources.ashby import AshbySource
 from job_searcher.sources.base import BaseJobSource
 from job_searcher.sources.custom_career_pages import CustomCareerPagesSource
 from job_searcher.sources.greenhouse import GreenhouseSource
@@ -21,6 +22,8 @@ def build_enabled_sources(config: AppConfig, project_root: Path) -> list[BaseJob
         sources.append(GreenhouseSource())
     if toggles.lever:
         sources.append(LeverSource())
+    if toggles.ashby:
+        sources.append(AshbySource())
     if toggles.static_pages:
         sources.append(StaticCompanyPagesSource(project_root))
     if toggles.custom_career_pages:

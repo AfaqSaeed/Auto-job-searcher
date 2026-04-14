@@ -60,6 +60,7 @@ class ScrapingSettings(BaseModel):
 class SourceToggles(BaseModel):
     greenhouse: bool = True
     lever: bool = True
+    ashby: bool = True
     static_pages: bool = False
     rss: bool = False
     manual_import: bool = True
@@ -95,6 +96,7 @@ class SourcesSettings(BaseModel):
     toggles: SourceToggles = Field(default_factory=SourceToggles)
     greenhouse_boards: list[str] = Field(default_factory=list)
     lever_boards: list[str] = Field(default_factory=list)
+    ashby_boards: list[str] = Field(default_factory=list)
     static_pages: list[StaticPageConfig] = Field(default_factory=list)
     custom_career_pages: list[CustomCareerPageConfig] = Field(default_factory=list)
     rss_feeds: list[str] = Field(default_factory=list)

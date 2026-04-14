@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import json
+import csv
 
 from find_job_borads.jobs_board_find_multi import run_board_discovery
 from job_searcher.config import AppConfig, ensure_runtime_directories, load_config, resolve_project_root
@@ -23,6 +24,7 @@ from job_searcher.schemas import JobListing, RankedJob, SearchQuery, SearchRepor
 from job_searcher.sources import build_enabled_sources
 from job_searcher.sources.base import SourceContext, SourceRunResult
 from job_searcher.utils.cache import JsonCache
+from job_searcher.utils.text import unique_preserve_order
 
 
 LOGGER = logging.getLogger(__name__)
@@ -93,10 +95,11 @@ class JobSearcherPipeline:
 
     def search_jobs(self, queries: list[SearchQuery] | None = None) -> list[JobListing]:
         active_queries = queries or self.load_queries()
-        context = SourceContext(config=self.config, cache=self.cache)
+        effective_config = self._config_with_discovered_boards()
+        context = SourceContext(config=effective_config, cache=self.cache)
         jobs: list[JobListing] = []
         self.last_source_runs = []
-        sources = build_enabled_sources(self.config, self.project_root)
+        sources = build_enabled_sources(effective_config, self.project_root)
         with log_timed_operation(
             self.logger,
             f"Job search across {len(sources)} enabled sources",
@@ -157,7 +160,7 @@ class JobSearcherPipeline:
         source_notes = [run.summary() for run in self.last_source_runs] if self.last_source_runs else []
         report = SearchReport(
             profile_summary=active_profile.summary or active_profile.llm_summary or '',
-            sources_searched=[source.name for source in build_enabled_sources(self.config, self.project_root)],
+            sources_searched=[source.name for source in build_enabled_sources(self._config_with_discovered_boards(), self.project_root)],
             queries=active_queries,
             total_jobs_raw_discovered=sum(item.raw_jobs_discovered for item in source_stats),
             total_jobs_filtered_out=sum(item.jobs_filtered_out for item in source_stats),
@@ -322,6 +325,45 @@ class JobSearcherPipeline:
                 stats.jobs_filtered_out = max(stats.jobs_filtered_out, int(item.get('filtered_out_count', 0) or 0))
                 by_source[source_name] = stats
         return list(by_source.values())
+
+    def _config_with_discovered_boards(self) -> AppConfig:
+        updated = self.config.model_copy(deep=True)
+        discovered = self._load_discovered_board_slugs()
+        updated.sources.greenhouse_boards = unique_preserve_order(
+            updated.sources.greenhouse_boards + discovered["greenhouse"]
+        )
+        updated.sources.lever_boards = unique_preserve_order(
+            updated.sources.lever_boards + discovered["lever"]
+        )
+        updated.sources.ashby_boards = unique_preserve_order(
+            updated.sources.ashby_boards + discovered["ashby"]
+        )
+        if updated.sources.ashby_boards:
+            updated.sources.toggles.ashby = True
+        return updated
+
+    def _load_discovered_board_slugs(self) -> dict[str, list[str]]:
+        path = self.artifacts.output_dir / "job_board_company_discovery_results.csv"
+        if not path.exists():
+            return {"greenhouse": [], "lever": [], "ashby": []}
+
+        found = {"greenhouse": [], "lever": [], "ashby": []}
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                greenhouse_slug = (row.get("greenhouse_slug") or "").strip()
+                lever_slug = (row.get("lever_slug") or "").strip()
+                ashby_slug = (row.get("ashby_slug") or "").strip()
+                if greenhouse_slug:
+                    found["greenhouse"].append(greenhouse_slug)
+                if lever_slug:
+                    found["lever"].append(lever_slug)
+                if ashby_slug:
+                    found["ashby"].append(ashby_slug)
+        return {
+            key: unique_preserve_order(values)
+            for key, values in found.items()
+        }
 
     @staticmethod
     def _dedupe_jobs(jobs: list[JobListing]) -> list[JobListing]:

@@ -107,6 +107,47 @@ def parse_lever_job(payload: dict) -> JobListing:
     )
 
 
+def parse_ashby_job(payload: dict, board_name: str | None = None) -> JobListing:
+    job_url = payload.get("jobUrl") or payload.get("applyUrl") or payload.get("url") or ""
+    description_parts = [
+        payload.get("description") or "",
+        payload.get("descriptionHtml") or "",
+        payload.get("content") or "",
+        payload.get("jobDescription") or "",
+    ]
+    for section in payload.get("jobPostSections", []) or []:
+        description_parts.append(section.get("content") or "")
+    description_html = "\n".join(part for part in description_parts if part)
+    description_text = html_to_text(description_html)
+    location = (
+        payload.get("location")
+        or payload.get("jobLocation")
+        or payload.get("secondaryLocation")
+        or (payload.get("locationName") if isinstance(payload.get("locationName"), str) else None)
+    )
+    return normalize_job_listing(
+        JobListing(
+            id=str(payload.get("id") or payload.get("jobId") or job_url),
+            source="ashby",
+            source_url=job_url,
+            title=payload.get("title") or payload.get("jobTitle") or "Unknown title",
+            company=payload.get("companyName") or board_name or "Unknown company",
+            location=location,
+            work_mode=infer_work_mode(location or "", description_text),
+            description=description_text,
+            required_skills=extract_skill_mentions(description_text),
+            preferred_skills=[],
+            responsibilities=extract_bullets(description_text)[:6],
+            minimum_qualifications=[],
+            domain_signals=extract_domain_signals(description_text),
+            application_url=payload.get("applyUrl") or job_url,
+            date_posted=payload.get("postedDate") or payload.get("publishedAt") or payload.get("updatedAt"),
+            language_requirements=extract_language_requirements(description_text),
+            raw_payload=payload,
+        )
+    )
+
+
 def parse_static_job_page(url: str, html: str, company: str | None = None, source: str = "static_company_pages") -> JobListing:
     soup = BeautifulSoup(html or "", "html.parser")
     title = (soup.find("h1") or soup.find("title") or soup.find("h2"))
