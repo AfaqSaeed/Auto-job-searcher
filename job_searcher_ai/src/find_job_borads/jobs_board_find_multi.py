@@ -1,4 +1,4 @@
-"""Discover likely target companies and Greenhouse boards from the user's real profile."""
+"""Discover likely target companies and public ATS boards from the user's real profile."""
 
 from __future__ import annotations
 
@@ -48,6 +48,8 @@ DISCOVERY_QUERIES = (
     "site:boards.greenhouse.io computer vision Germany",
     "site:job-boards.eu.greenhouse.io robotics Germany",
     "site:boards.greenhouse.io multimodal ai Europe",
+    "site:jobs.lever.co computer vision Germany",
+    "site:jobs.ashbyhq.com robotics Germany",
     "top robotics startups Germany",
     "top computer vision companies Germany",
     "slam companies Europe",
@@ -117,7 +119,7 @@ def setup_logging() -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="job_board_finder",
-        description="Discover relevant companies and Greenhouse boards from the user's profile.",
+        description="Discover relevant companies and public ATS boards from the user's profile.",
     )
     parser.add_argument(
         "--project-root",
@@ -154,7 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-workers",
         type=int,
         default=10,
-        help="Parallel workers for Greenhouse checks",
+        help="Parallel workers for ATS checks",
     )
     parser.add_argument(
         "--output-dir",
@@ -389,32 +391,158 @@ def test_greenhouse_slug(slug: str, timeout_seconds: int, sleep_between_requests
     }
 
 
-def check_company_greenhouse(
+def test_lever_slug(slug: str, timeout_seconds: int, sleep_between_requests: float) -> dict[str, Any]:
+    page_urls = [
+        f"https://jobs.lever.co/{slug}",
+        f"https://jobs.eu.lever.co/{slug}",
+    ]
+    found_url: str | None = None
+    page_status: int | None = None
+
+    for page_url in page_urls:
+        response = safe_get(page_url, timeout_seconds)
+        time.sleep(sleep_between_requests)
+        if response is None:
+            continue
+        page_status = response.status_code
+        if response.status_code == 200 and "lever.co" in response.url.lower():
+            found_url = response.url
+            break
+
+    api_urls = [
+        f"https://api.lever.co/v0/postings/{slug}?mode=json",
+        f"https://api.eu.lever.co/v0/postings/{slug}?mode=json",
+    ]
+    api_ok = False
+    api_status: int | None = None
+    api_jobs_count: int | None = None
+    api_url_used: str | None = None
+
+    for api_url in api_urls:
+        api_response = safe_get(api_url, timeout_seconds)
+        time.sleep(sleep_between_requests)
+        if api_response is None:
+            continue
+        api_status = api_response.status_code
+        api_url_used = api_url
+        if api_response.status_code == 200:
+            api_ok = True
+            try:
+                data = api_response.json()
+                api_jobs_count = len(data) if isinstance(data, list) else None
+            except Exception as exc:  # pragma: no cover - malformed remote payload
+                LOGGER.debug("Failed to decode Lever API response for %s: %s", slug, exc)
+            break
+
+    return {
+        "slug": slug,
+        "lever_url": found_url,
+        "lever_status": page_status,
+        "api_url": api_url_used,
+        "api_status": api_status,
+        "api_ok": api_ok,
+        "api_jobs_count": api_jobs_count,
+    }
+
+
+def test_ashby_slug(slug: str, timeout_seconds: int, sleep_between_requests: float) -> dict[str, Any]:
+    page_urls = [
+        f"https://jobs.ashbyhq.com/{slug}",
+    ]
+    found_url: str | None = None
+    page_status: int | None = None
+
+    for page_url in page_urls:
+        response = safe_get(page_url, timeout_seconds)
+        time.sleep(sleep_between_requests)
+        if response is None:
+            continue
+        page_status = response.status_code
+        if response.status_code == 200 and "ashbyhq.com" in response.url.lower():
+            found_url = response.url
+            break
+
+    api_url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
+    api_response = safe_get(api_url, timeout_seconds)
+    time.sleep(sleep_between_requests)
+
+    api_ok = False
+    api_jobs_count: int | None = None
+    api_status = api_response.status_code if api_response is not None else None
+
+    if api_response is not None and api_response.status_code == 200:
+        api_ok = True
+        try:
+            data = api_response.json()
+            jobs = data.get("jobs", []) if isinstance(data, dict) else []
+            api_jobs_count = len(jobs)
+        except Exception as exc:  # pragma: no cover - malformed remote payload
+            LOGGER.debug("Failed to decode Ashby API response for %s: %s", slug, exc)
+
+    return {
+        "slug": slug,
+        "ashby_url": found_url,
+        "ashby_status": page_status,
+        "api_url": api_url,
+        "api_status": api_status,
+        "api_ok": api_ok,
+        "api_jobs_count": api_jobs_count,
+    }
+
+
+def _best_ats_hit(
+    slug_variants: list[str],
+    timeout_seconds: int,
+    sleep_between_requests: float,
+    tester,
+    url_key: str,
+) -> dict[str, Any] | None:
+    for slug in slug_variants[:5]:
+        hit = tester(slug, timeout_seconds, sleep_between_requests)
+        if hit.get(url_key) or hit.get("api_ok"):
+            return hit
+    return None
+
+
+def check_company_ats(
     company: str,
     timeout_seconds: int,
     sleep_between_requests: float,
-    max_slug_variants: int = 5,
 ) -> dict[str, Any]:
     start = time.time()
     slug_variants = generate_slug_variants(company)
-    best_hit: dict[str, Any] | None = None
-
-    for slug in slug_variants[:max_slug_variants]:
-        hit = test_greenhouse_slug(slug, timeout_seconds, sleep_between_requests)
-        if hit["greenhouse_url"] or hit["api_ok"]:
-            best_hit = hit
-            break
+    greenhouse_hit = _best_ats_hit(
+        slug_variants, timeout_seconds, sleep_between_requests, test_greenhouse_slug, "greenhouse_url"
+    )
+    lever_hit = _best_ats_hit(
+        slug_variants, timeout_seconds, sleep_between_requests, test_lever_slug, "lever_url"
+    )
+    ashby_hit = _best_ats_hit(
+        slug_variants, timeout_seconds, sleep_between_requests, test_ashby_slug, "ashby_url"
+    )
 
     elapsed = time.time() - start
     return {
         "company": company,
         "slug_variants": json.dumps(slug_variants, ensure_ascii=False),
-        "greenhouse_slug": best_hit["slug"] if best_hit else None,
-        "greenhouse_url": best_hit["greenhouse_url"] if best_hit else None,
-        "greenhouse_status": best_hit["greenhouse_status"] if best_hit else None,
-        "greenhouse_api_status": best_hit["api_status"] if best_hit else None,
-        "greenhouse_api_ok": best_hit["api_ok"] if best_hit else False,
-        "greenhouse_jobs_count": best_hit["api_jobs_count"] if best_hit else None,
+        "greenhouse_slug": greenhouse_hit["slug"] if greenhouse_hit else None,
+        "greenhouse_url": greenhouse_hit["greenhouse_url"] if greenhouse_hit else None,
+        "greenhouse_status": greenhouse_hit["greenhouse_status"] if greenhouse_hit else None,
+        "greenhouse_api_status": greenhouse_hit["api_status"] if greenhouse_hit else None,
+        "greenhouse_api_ok": greenhouse_hit["api_ok"] if greenhouse_hit else False,
+        "greenhouse_jobs_count": greenhouse_hit["api_jobs_count"] if greenhouse_hit else None,
+        "lever_slug": lever_hit["slug"] if lever_hit else None,
+        "lever_url": lever_hit["lever_url"] if lever_hit else None,
+        "lever_status": lever_hit["lever_status"] if lever_hit else None,
+        "lever_api_status": lever_hit["api_status"] if lever_hit else None,
+        "lever_api_ok": lever_hit["api_ok"] if lever_hit else False,
+        "lever_jobs_count": lever_hit["api_jobs_count"] if lever_hit else None,
+        "ashby_slug": ashby_hit["slug"] if ashby_hit else None,
+        "ashby_url": ashby_hit["ashby_url"] if ashby_hit else None,
+        "ashby_status": ashby_hit["ashby_status"] if ashby_hit else None,
+        "ashby_api_status": ashby_hit["api_status"] if ashby_hit else None,
+        "ashby_api_ok": ashby_hit["api_ok"] if ashby_hit else False,
+        "ashby_jobs_count": ashby_hit["api_jobs_count"] if ashby_hit else None,
         "elapsed_seconds": round(elapsed, 2),
     }
 
@@ -431,20 +559,14 @@ def enrich_companies_parallel(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(
-                check_company_greenhouse,
-                company,
-                timeout_seconds,
-                sleep_between_requests,
-            ): company
-            for company in companies
+            executor.submit(check_company_ats, company, timeout_seconds, sleep_between_requests): company for company in companies
         }
         for future in as_completed(futures):
             company = futures[future]
             try:
                 rows.append(future.result())
             except Exception as exc:  # pragma: no cover - defensive
-                LOGGER.warning("Greenhouse check failed for %s: %s", company, exc)
+                LOGGER.warning("ATS check failed for %s: %s", company, exc)
                 rows.append(
                     {
                         "company": company,
@@ -455,13 +577,25 @@ def enrich_companies_parallel(
                         "greenhouse_api_status": None,
                         "greenhouse_api_ok": False,
                         "greenhouse_jobs_count": None,
+                        "lever_slug": None,
+                        "lever_url": None,
+                        "lever_status": None,
+                        "lever_api_status": None,
+                        "lever_api_ok": False,
+                        "lever_jobs_count": None,
+                        "ashby_slug": None,
+                        "ashby_url": None,
+                        "ashby_status": None,
+                        "ashby_api_status": None,
+                        "ashby_api_ok": False,
+                        "ashby_jobs_count": None,
                         "elapsed_seconds": None,
                     }
                 )
 
     total_elapsed = time.time() - start_all
     avg_time = total_elapsed / max(len(companies), 1)
-    LOGGER.info("Finished Greenhouse checks in %.1fs", total_elapsed)
+    LOGGER.info("Finished ATS checks in %.1fs", total_elapsed)
     LOGGER.info("Average wall-clock time per company: %.2fs using %s workers", avg_time, max_workers)
     return rows
 
@@ -513,8 +647,16 @@ def discover_companies(
     dataframe = pd.DataFrame(rows)
     dataframe["relevance_score"] = dataframe["company"].apply(lambda company: score_company(company, keywords))
     dataframe["has_greenhouse"] = dataframe["greenhouse_url"].notna() | dataframe["greenhouse_api_ok"].fillna(False)
+    dataframe["has_lever"] = dataframe["lever_url"].notna() | dataframe["lever_api_ok"].fillna(False)
+    dataframe["has_ashby"] = dataframe["ashby_url"].notna() | dataframe["ashby_api_ok"].fillna(False)
+    dataframe["has_any_ats"] = dataframe["has_greenhouse"] | dataframe["has_lever"] | dataframe["has_ashby"]
+    dataframe["total_jobs_count"] = (
+        dataframe["greenhouse_jobs_count"].fillna(0)
+        + dataframe["lever_jobs_count"].fillna(0)
+        + dataframe["ashby_jobs_count"].fillna(0)
+    )
     dataframe = dataframe.sort_values(
-        by=["has_greenhouse", "greenhouse_jobs_count", "relevance_score", "company"],
+        by=["has_any_ats", "total_jobs_count", "relevance_score", "company"],
         ascending=[False, False, False, True],
     ).reset_index(drop=True)
 
@@ -527,6 +669,9 @@ def discover_companies(
         "search_warnings": search_warnings,
         "candidate_company_count": len(company_names),
         "search_result_count": len(search_results),
+        "greenhouse_hits": int(dataframe["has_greenhouse"].sum()),
+        "lever_hits": int(dataframe["has_lever"].sum()),
+        "ashby_hits": int(dataframe["has_ashby"].sum()),
     }
     return dataframe, metadata
 
@@ -535,6 +680,9 @@ def save_outputs(df: pd.DataFrame, metadata: dict[str, Any], output_dir: Path) -
     output_dir.mkdir(parents=True, exist_ok=True)
     discovery_csv = output_dir / "job_board_company_discovery_results.csv"
     greenhouse_csv = output_dir / "job_board_confirmed_greenhouse_companies.csv"
+    lever_csv = output_dir / "job_board_confirmed_lever_companies.csv"
+    ashby_csv = output_dir / "job_board_confirmed_ashby_companies.csv"
+    ats_csv = output_dir / "job_board_confirmed_any_ats_companies.csv"
     metadata_json = output_dir / "job_board_discovery_metadata.json"
 
     df.to_csv(discovery_csv, index=False, encoding="utf-8")
@@ -543,6 +691,18 @@ def save_outputs(df: pd.DataFrame, metadata: dict[str, Any], output_dir: Path) -
     confirmed_greenhouse = df[df["has_greenhouse"] == True].copy()
     confirmed_greenhouse.to_csv(greenhouse_csv, index=False, encoding="utf-8")
     LOGGER.info("Saved %s", greenhouse_csv)
+
+    confirmed_lever = df[df["has_lever"] == True].copy()
+    confirmed_lever.to_csv(lever_csv, index=False, encoding="utf-8")
+    LOGGER.info("Saved %s", lever_csv)
+
+    confirmed_ashby = df[df["has_ashby"] == True].copy()
+    confirmed_ashby.to_csv(ashby_csv, index=False, encoding="utf-8")
+    LOGGER.info("Saved %s", ashby_csv)
+
+    confirmed_any_ats = df[df["has_any_ats"] == True].copy()
+    confirmed_any_ats.to_csv(ats_csv, index=False, encoding="utf-8")
+    LOGGER.info("Saved %s", ats_csv)
 
     metadata_json.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
     LOGGER.info("Saved %s", metadata_json)
