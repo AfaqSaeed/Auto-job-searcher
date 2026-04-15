@@ -128,6 +128,7 @@ class PipelineArtifacts(BaseModel):
     top_matches_md: Path
     search_report_md: Path
     search_report_json: Path
+    pipeline_state_json: Path
 
     @classmethod
     def from_root(cls, root: Path, output_dir: str, cache_dir: str) -> "PipelineArtifacts":
@@ -157,4 +158,5 @@ class PipelineArtifacts(BaseModel):
             top_matches_md=output_path / "top_matches.md",
             search_report_md=output_path / "search_report.md",
             search_report_json=output_path / "search_report.json",
+            pipeline_state_json=output_path / "pipeline_state.json",
         )

@@ -2,6 +2,7 @@ from pathlib import Path
 
 from job_searcher.config import load_config
 from job_searcher.models import PipelineArtifacts
+from job_searcher.pipeline import JobSearcherPipeline
 from job_searcher.schemas import JobListing
 from job_searcher.sources.base import SourceRunResult
 
@@ -22,6 +23,7 @@ def test_pipeline_artifacts_include_filtered_jobs_debug() -> None:
     assert artifacts.site_filtered_jobs_partial_json.name == 'site_filtered_jobs.partial.json'
     assert artifacts.site_filtered_jobs_md.name == 'site_filtered_jobs.md'
     assert artifacts.discovered_jobs_partial_json.name == 'discovered_jobs.partial.json'
+    assert artifacts.pipeline_state_json.name == 'pipeline_state.json'
 
 
 def test_source_run_result_debug_payload_includes_filtered_jobs() -> None:
@@ -70,3 +72,18 @@ def test_source_run_result_can_merge_partial_runs() -> None:
     assert aggregate.raw_jobs == 1
     assert aggregate.matched_jobs == 1
     assert aggregate.jobs[0].title == 'Vision Engineer'
+
+
+def test_pipeline_state_skips_completed_step_when_fingerprint_matches(tmp_path: Path) -> None:
+    (tmp_path / 'config').mkdir()
+    (tmp_path / 'src').mkdir()
+    (tmp_path / 'config' / 'settings.yaml').write_text('{}', encoding='utf-8')
+
+    pipeline = JobSearcherPipeline(project_root=tmp_path)
+    artifact = pipeline.artifacts.output_dir / 'dummy.json'
+    artifact.write_text('{}', encoding='utf-8')
+
+    pipeline._mark_step_completed('generate_queries', 'abc123', [artifact])
+
+    assert pipeline._should_skip_step('generate_queries', 'abc123', [artifact]) is True
+    assert pipeline._should_skip_step('generate_queries', 'different', [artifact]) is False

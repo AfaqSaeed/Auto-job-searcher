@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 import json
 import csv
+import hashlib
+from datetime import datetime, timezone
 
 from find_job_borads.jobs_board_find_multi import run_board_discovery
 from job_searcher.config import AppConfig, ensure_runtime_directories, load_config, resolve_project_root
@@ -46,14 +48,27 @@ class JobSearcherPipeline:
         self.cache = JsonCache(self.artifacts.cache_dir)
         self.llm_client = OllamaClient(self.config.ollama) if self.config.ollama.enabled else None
         self.last_source_runs: list[SourceRunResult] = []
+        self._config_fingerprint = self._fingerprint_text(self.config.model_dump_json())
 
     def ingest_profile(self, input_path: Path, supplemental_files: list[Path] | None = None) -> UserProfile:
-        document = read_profile_document(self._resolve_path(input_path), [self._resolve_path(path) for path in supplemental_files or []])
+        resolved_input = self._resolve_path(input_path)
+        resolved_supplemental = [self._resolve_path(path) for path in supplemental_files or []]
+        document = read_profile_document(resolved_input, resolved_supplemental)
         extracted = extract_profile(document)
         profile = apply_insights(extracted, summarize_profile(extracted, self.llm_client))
         write_json_output(document.model_dump(mode='json'), self.artifacts.profile_document_json)
         write_json_output(profile.model_dump(mode='json'), self.artifacts.profile_structured_json)
         self._write_profile_keyword_artifacts(profile)
+        self._mark_step_completed(
+            'ingest_profile',
+            self._profile_input_fingerprint(resolved_input, resolved_supplemental),
+            [
+                self.artifacts.profile_document_json,
+                self.artifacts.profile_structured_json,
+                self.artifacts.profile_keywords_json,
+                self.artifacts.profile_keywords_md,
+            ],
+        )
         self.logger.info('Profile ingested: %s experiences, %s projects', len(profile.work_experience), len(profile.projects))
         return profile
 
@@ -66,6 +81,7 @@ class JobSearcherPipeline:
         active_profile = profile or self.load_profile()
         queries = generate_search_queries(active_profile, self.config)
         write_json_output([query.model_dump(mode='json') for query in queries], self.artifacts.search_queries_json)
+        self._mark_step_completed('generate_queries', self._profile_dependent_fingerprint(), [self.artifacts.search_queries_json])
         self.logger.info('Generated %s search queries', len(queries))
         return queries
 
@@ -82,6 +98,14 @@ class JobSearcherPipeline:
                 config=self.config,
                 output_dir=self.artifacts.output_dir,
             )
+        self._mark_step_completed(
+            'discover_job_boards',
+            self._profile_dependent_fingerprint(),
+            [
+                self.artifacts.output_dir / 'job_board_company_discovery_results.csv',
+                self.artifacts.output_dir / 'job_board_discovery_metadata.json',
+            ],
+        )
         self.logger.info(
             'Job board discovery completed: %s queries, %s candidate companies',
             len(metadata.get('queries_used', [])),
@@ -123,6 +147,16 @@ class JobSearcherPipeline:
         deduped = self._dedupe_jobs(jobs)
         self._write_search_artifacts()
         self._clear_search_checkpoint_artifacts()
+        self._mark_step_completed(
+            'search_jobs',
+            self._profile_dependent_fingerprint(),
+            [
+                self.artifacts.discovered_jobs_json,
+                self.artifacts.filtered_jobs_debug_json,
+                self.artifacts.custom_career_pages_debug_json,
+                self.artifacts.site_filtered_jobs_json,
+            ],
+        )
         return deduped
 
     def load_jobs(self) -> list[JobListing]:
@@ -138,6 +172,15 @@ class JobSearcherPipeline:
         self.artifacts.top_matches_md.write_text(
             build_top_matches_markdown(ranked_jobs, self.config.outputs.top_n_markdown),
             encoding='utf-8',
+        )
+        self._mark_step_completed(
+            'rank_jobs',
+            self._profile_dependent_fingerprint(),
+            [
+                self.artifacts.jobs_ranked_json,
+                self.artifacts.jobs_ranked_csv,
+                self.artifacts.top_matches_md,
+            ],
         )
         self.logger.info('Ranked %s jobs', len(ranked_jobs))
         return ranked_jobs
@@ -179,19 +222,149 @@ class JobSearcherPipeline:
         )
         write_json_output(report.model_dump(mode='json'), self.artifacts.search_report_json)
         self.artifacts.search_report_md.write_text(build_search_report_markdown(report), encoding='utf-8')
+        self._mark_step_completed(
+            'report',
+            self._profile_dependent_fingerprint(),
+            [self.artifacts.search_report_json, self.artifacts.search_report_md],
+        )
         self.logger.info('Report written to %s', self.artifacts.search_report_md)
         return report
 
     def run_all(self, input_path: Path, supplemental_files: list[Path] | None = None) -> SearchReport:
-        profile = self.ingest_profile(input_path, supplemental_files=supplemental_files)
-        self.discover_job_boards(profile)
-        queries = self.generate_queries(profile)
-        jobs = self.search_jobs(queries)
-        ranked = self.rank_jobs(profile, jobs)
+        resolved_input = self._resolve_path(input_path)
+        resolved_supplemental = [self._resolve_path(path) for path in supplemental_files or []]
+        profile_fingerprint = self._profile_input_fingerprint(resolved_input, resolved_supplemental)
+        dependent_fingerprint = self._profile_dependent_fingerprint(profile_fingerprint)
+
+        if self._should_skip_step(
+            'ingest_profile',
+            profile_fingerprint,
+            [
+                self.artifacts.profile_document_json,
+                self.artifacts.profile_structured_json,
+                self.artifacts.profile_keywords_json,
+                self.artifacts.profile_keywords_md,
+            ],
+        ):
+            self.logger.info('Skipping ingest-profile because the profile inputs are unchanged and artifacts already exist')
+            profile = self.load_profile()
+        else:
+            profile = self.ingest_profile(resolved_input, supplemental_files=resolved_supplemental)
+
+        if self._should_skip_step(
+            'discover_job_boards',
+            dependent_fingerprint,
+            [
+                self.artifacts.output_dir / 'job_board_company_discovery_results.csv',
+                self.artifacts.output_dir / 'job_board_discovery_metadata.json',
+            ],
+        ):
+            self.logger.info('Skipping discover-boards because the profile/config inputs are unchanged and artifacts already exist')
+        else:
+            self.discover_job_boards(profile)
+
+        if self._should_skip_step('generate_queries', dependent_fingerprint, [self.artifacts.search_queries_json]):
+            self.logger.info('Skipping generate-queries because the profile/config inputs are unchanged and artifacts already exist')
+            queries = self.load_queries()
+        else:
+            queries = self.generate_queries(profile)
+
+        if self._should_skip_step(
+            'search_jobs',
+            dependent_fingerprint,
+            [
+                self.artifacts.discovered_jobs_json,
+                self.artifacts.filtered_jobs_debug_json,
+                self.artifacts.custom_career_pages_debug_json,
+                self.artifacts.site_filtered_jobs_json,
+            ],
+        ):
+            self.logger.info('Skipping search-jobs because the profile/config inputs are unchanged and artifacts already exist')
+            jobs = self.load_jobs()
+        else:
+            jobs = self.search_jobs(queries)
+
+        rank_artifacts = [
+            self.artifacts.jobs_ranked_json,
+            self.artifacts.jobs_ranked_csv,
+            self.artifacts.top_matches_md,
+        ]
+        if self._should_skip_step('rank_jobs', dependent_fingerprint, rank_artifacts):
+            self.logger.info('Skipping rank-jobs because the profile/config inputs are unchanged and artifacts already exist')
+            ranked = self.load_ranked_jobs()
+        else:
+            ranked = self.rank_jobs(profile, jobs)
+
+        report_artifacts = [self.artifacts.search_report_json, self.artifacts.search_report_md]
+        if self._should_skip_step('report', dependent_fingerprint, report_artifacts):
+            self.logger.info('Skipping report because the profile/config inputs are unchanged and artifacts already exist')
+            payload = self.cache.read_json(self.artifacts.search_report_json)
+            return SearchReport.model_validate(payload)
         return self.report(profile, queries, ranked)
 
     def _resolve_path(self, value: Path) -> Path:
         return value if value.is_absolute() else (self.project_root / value)
+
+    @staticmethod
+    def _fingerprint_text(value: str) -> str:
+        return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+    @staticmethod
+    def _fingerprint_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open('rb') as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _profile_input_fingerprint(self, input_path: Path, supplemental_files: list[Path]) -> str:
+        entries: list[dict[str, str]] = []
+        for path in [input_path, *supplemental_files]:
+            entries.append(
+                {
+                    'path': str(path.resolve()),
+                    'sha256': self._fingerprint_file(path),
+                }
+            )
+        return self._fingerprint_text(json.dumps(entries, sort_keys=True))
+
+    def _profile_dependent_fingerprint(self, profile_fingerprint: str | None = None) -> str:
+        payload = {
+            'profile_fingerprint': profile_fingerprint or self._load_step_fingerprint('ingest_profile'),
+            'config_fingerprint': self._config_fingerprint,
+        }
+        return self._fingerprint_text(json.dumps(payload, sort_keys=True))
+
+    def _load_pipeline_state(self) -> dict:
+        if not self.artifacts.pipeline_state_json.exists():
+            return {'steps': {}}
+        return self.cache.read_json(self.artifacts.pipeline_state_json)
+
+    def _write_pipeline_state(self, state: dict) -> None:
+        write_json_output(state, self.artifacts.pipeline_state_json)
+
+    def _load_step_fingerprint(self, step_name: str) -> str:
+        state = self._load_pipeline_state()
+        return str(state.get('steps', {}).get(step_name, {}).get('fingerprint', ''))
+
+    def _mark_step_completed(self, step_name: str, fingerprint: str, artifacts: list[Path]) -> None:
+        state = self._load_pipeline_state()
+        steps = state.setdefault('steps', {})
+        steps[step_name] = {
+            'fingerprint': fingerprint,
+            'artifacts': [str(path) for path in artifacts],
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+        }
+        self._write_pipeline_state(state)
+
+    @staticmethod
+    def _artifacts_exist(paths: list[Path]) -> bool:
+        return all(path.exists() for path in paths)
+
+    def _should_skip_step(self, step_name: str, fingerprint: str, artifacts: list[Path]) -> bool:
+        state = self._load_pipeline_state()
+        step = state.get('steps', {}).get(step_name, {})
+        return bool(step) and step.get('fingerprint') == fingerprint and self._artifacts_exist(artifacts)
 
     def _ensure_profile_keyword_artifacts(self, profile: UserProfile) -> None:
         if self.artifacts.profile_keywords_json.exists() and self.artifacts.profile_keywords_md.exists():
