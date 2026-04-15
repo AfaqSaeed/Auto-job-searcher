@@ -31,6 +31,15 @@ from job_searcher.utils.text import unique_preserve_order
 
 LOGGER = logging.getLogger(__name__)
 
+PIPELINE_STAGES = (
+    'ingest-profile',
+    'discover-boards',
+    'generate-queries',
+    'search-jobs',
+    'rank-jobs',
+    'report',
+)
+
 
 class JobSearcherPipeline:
     """High-level orchestration for the local job-search workflow."""
@@ -231,12 +240,26 @@ class JobSearcherPipeline:
         return report
 
     def run_all(self, input_path: Path, supplemental_files: list[Path] | None = None) -> SearchReport:
+        return self.run_from('ingest-profile', input_path, supplemental_files=supplemental_files)
+
+    def run_from(
+        self,
+        start_from: str,
+        input_path: Path,
+        supplemental_files: list[Path] | None = None,
+    ) -> SearchReport:
+        if start_from not in PIPELINE_STAGES:
+            raise ValueError(f'Unknown pipeline stage: {start_from}')
+
         resolved_input = self._resolve_path(input_path)
         resolved_supplemental = [self._resolve_path(path) for path in supplemental_files or []]
         profile_fingerprint = self._profile_input_fingerprint(resolved_input, resolved_supplemental)
         dependent_fingerprint = self._profile_dependent_fingerprint(profile_fingerprint)
+        start_index = PIPELINE_STAGES.index(start_from)
 
-        if self._should_skip_step(
+        force_from_start = lambda stage_name: PIPELINE_STAGES.index(stage_name) >= start_index
+
+        if not force_from_start('ingest-profile') and self._should_skip_step(
             'ingest_profile',
             profile_fingerprint,
             [
@@ -251,7 +274,7 @@ class JobSearcherPipeline:
         else:
             profile = self.ingest_profile(resolved_input, supplemental_files=resolved_supplemental)
 
-        if self._should_skip_step(
+        if not force_from_start('discover-boards') and self._should_skip_step(
             'discover_job_boards',
             dependent_fingerprint,
             [
@@ -263,13 +286,17 @@ class JobSearcherPipeline:
         else:
             self.discover_job_boards(profile)
 
-        if self._should_skip_step('generate_queries', dependent_fingerprint, [self.artifacts.search_queries_json]):
+        if not force_from_start('generate-queries') and self._should_skip_step(
+            'generate_queries',
+            dependent_fingerprint,
+            [self.artifacts.search_queries_json],
+        ):
             self.logger.info('Skipping generate-queries because the profile/config inputs are unchanged and artifacts already exist')
             queries = self.load_queries()
         else:
             queries = self.generate_queries(profile)
 
-        if self._should_skip_step(
+        if not force_from_start('search-jobs') and self._should_skip_step(
             'search_jobs',
             dependent_fingerprint,
             [
@@ -289,14 +316,22 @@ class JobSearcherPipeline:
             self.artifacts.jobs_ranked_csv,
             self.artifacts.top_matches_md,
         ]
-        if self._should_skip_step('rank_jobs', dependent_fingerprint, rank_artifacts):
+        if not force_from_start('rank-jobs') and self._should_skip_step(
+            'rank_jobs',
+            dependent_fingerprint,
+            rank_artifacts,
+        ):
             self.logger.info('Skipping rank-jobs because the profile/config inputs are unchanged and artifacts already exist')
             ranked = self.load_ranked_jobs()
         else:
             ranked = self.rank_jobs(profile, jobs)
 
         report_artifacts = [self.artifacts.search_report_json, self.artifacts.search_report_md]
-        if self._should_skip_step('report', dependent_fingerprint, report_artifacts):
+        if not force_from_start('report') and self._should_skip_step(
+            'report',
+            dependent_fingerprint,
+            report_artifacts,
+        ):
             self.logger.info('Skipping report because the profile/config inputs are unchanged and artifacts already exist')
             payload = self.cache.read_json(self.artifacts.search_report_json)
             return SearchReport.model_validate(payload)

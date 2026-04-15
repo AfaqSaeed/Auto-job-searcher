@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from job_searcher.pipeline import JobSearcherPipeline
+from job_searcher.pipeline import JobSearcherPipeline, PIPELINE_STAGES
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +28,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_all = subparsers.add_parser("run-all", help="Execute the full pipeline")
     run_all.add_argument("--input", type=Path, required=True, help="Main profile markdown or text file")
     run_all.add_argument("--resume", type=Path, nargs="*", default=[], help="Optional supplemental resume files")
+    run_all.add_argument(
+        "--start-from",
+        choices=PIPELINE_STAGES,
+        default="ingest-profile",
+        help="Start the pipeline from a particular stage instead of the beginning",
+    )
     return parser
 
 
@@ -49,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "report":
         pipeline.report()
     elif args.command == "run-all":
-        pipeline.run_all(args.input, supplemental_files=args.resume)
+        pipeline.run_from(args.start_from, args.input, supplemental_files=args.resume)
     else:  # pragma: no cover - argparse prevents this
         parser.error(f"Unknown command: {args.command}")
     return 0
