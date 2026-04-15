@@ -41,6 +41,9 @@ class FakeContext:
     def add_note_diagnostic(self, *, url: str, message: str, kind: str, status_code: int | None = None) -> None:
         self._diagnostics.append({'url': url, 'message': message, 'kind': kind, 'status_code': status_code})
 
+    def maybe_checkpoint(self, result, *, force: bool = False) -> None:
+        return None
+
 
 class RenderedSource(CustomCareerPagesSource):
     def __init__(self, rendered_urls: list[str]) -> None:

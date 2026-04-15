@@ -6,7 +6,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
@@ -40,6 +40,26 @@ class SourceRunResult:
     diagnostics: list[RequestDiagnostic] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     debug_data: dict[str, Any] = field(default_factory=dict)
+
+    def merge_from(self, other: "SourceRunResult") -> None:
+        """Merge another run result into this one."""
+
+        self.jobs.extend(other.jobs)
+        self.filtered_out_jobs.extend(other.filtered_out_jobs)
+        self.filtered_out_details.extend(other.filtered_out_details)
+        self.discovered_jobs.extend(other.discovered_jobs)
+        self.raw_jobs += other.raw_jobs
+        self.matched_jobs += other.matched_jobs
+        self.diagnostics.extend(other.diagnostics)
+        self.notes.extend(other.notes)
+        for key, value in other.debug_data.items():
+            existing = self.debug_data.get(key)
+            if isinstance(existing, list) and isinstance(value, list):
+                existing.extend(value)
+            elif key not in self.debug_data:
+                self.debug_data[key] = value
+            else:
+                self.debug_data[key] = value
 
     def summary(self) -> str:
         """Build a concise source result summary for logs and reports."""
@@ -119,6 +139,9 @@ class SourceContext:
     _last_request_at: float = 0.0
     active_source: str = "unknown"
     request_diagnostics: list[RequestDiagnostic] = field(default_factory=list)
+    checkpoint_callback: Callable[[SourceRunResult], None] | None = None
+    checkpoint_interval_seconds: float = 30.0
+    _last_checkpoint_at: float = 0.0
 
     def __post_init__(self) -> None:
         self.session.headers.update({"User-Agent": self.config.scraping.user_agent})
@@ -136,6 +159,20 @@ class SourceContext:
         self.request_diagnostics.append(
             RequestDiagnostic(url=url, status_code=status_code, message=message, kind=kind)
         )
+
+    def maybe_checkpoint(self, result: SourceRunResult, *, force: bool = False) -> None:
+        """Persist an in-progress source result if checkpointing is enabled."""
+
+        if self.checkpoint_callback is None:
+            return
+        now = time.monotonic()
+        if not force and self._last_checkpoint_at and (now - self._last_checkpoint_at) < self.checkpoint_interval_seconds:
+            return
+        try:
+            self.checkpoint_callback(result)
+            self._last_checkpoint_at = now
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.warning("Failed to write search checkpoint for %s: %s", result.source_name, exc)
 
     def get_json(self, url: str) -> dict | list:
         payload = self._request(url, expect_json=True)

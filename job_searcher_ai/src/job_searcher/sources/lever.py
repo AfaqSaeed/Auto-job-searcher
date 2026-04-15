@@ -44,9 +44,11 @@ class LeverSource(BaseJobSource):
                 item.setdefault("company", board.replace("-", " ").title())
                 job = parse_lever_job(item)
                 self.apply_query_filter(result, job, queries)
+                context.maybe_checkpoint(result)
                 job_progress.advance()
             job_progress.finish()
             board_progress.advance()
+            context.maybe_checkpoint(result, force=True)
         board_progress.finish()
 
         result.diagnostics = context.take_diagnostics()

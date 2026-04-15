@@ -113,10 +113,15 @@ class PipelineArtifacts(BaseModel):
     profile_keywords_md: Path
     search_queries_json: Path
     discovered_jobs_json: Path
+    discovered_jobs_partial_json: Path
     filtered_jobs_debug_json: Path
+    filtered_jobs_debug_partial_json: Path
     custom_career_pages_debug_json: Path
+    custom_career_pages_debug_partial_json: Path
     custom_career_page_filters_json: Path
+    custom_career_page_filters_partial_json: Path
     site_filtered_jobs_json: Path
+    site_filtered_jobs_partial_json: Path
     site_filtered_jobs_md: Path
     jobs_ranked_json: Path
     jobs_ranked_csv: Path
@@ -137,10 +142,15 @@ class PipelineArtifacts(BaseModel):
             profile_keywords_md=output_path / "profile_keywords.md",
             search_queries_json=output_path / "search_queries.json",
             discovered_jobs_json=output_path / "discovered_jobs.json",
+            discovered_jobs_partial_json=output_path / "discovered_jobs.partial.json",
             filtered_jobs_debug_json=output_path / "filtered_jobs_debug.json",
+            filtered_jobs_debug_partial_json=output_path / "filtered_jobs_debug.partial.json",
             custom_career_pages_debug_json=output_path / "custom_career_pages_debug.json",
+            custom_career_pages_debug_partial_json=output_path / "custom_career_pages_debug.partial.json",
             custom_career_page_filters_json=output_path / "custom_career_page_filters.json",
+            custom_career_page_filters_partial_json=output_path / "custom_career_page_filters.partial.json",
             site_filtered_jobs_json=output_path / "site_filtered_jobs.json",
+            site_filtered_jobs_partial_json=output_path / "site_filtered_jobs.partial.json",
             site_filtered_jobs_md=output_path / "site_filtered_jobs.md",
             jobs_ranked_json=output_path / "jobs_ranked.json",
             jobs_ranked_csv=output_path / "jobs_ranked.csv",

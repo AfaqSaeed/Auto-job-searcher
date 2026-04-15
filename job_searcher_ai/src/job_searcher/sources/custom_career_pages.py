@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -66,15 +66,14 @@ class CustomCareerPagesSource(BaseJobSource):
 
         page_progress = ProgressLogger(LOGGER, "Custom career pages", len(pages), min_interval_seconds=3.0)
         for page in pages:
-            discovered = self._discover_jobs_for_page(page, context, queries)
-            if not discovered:
+            page_result = SourceRunResult(source_name=self.name)
+            self._discover_jobs_for_page(page, context, queries, page_result)
+            if not page_result.discovered_jobs:
                 result.notes.append(f"{page.name}: no candidate job detail pages were discovered")
                 page_progress.advance()
                 continue
-            result.raw_jobs += len(discovered)
-            result.discovered_jobs.extend(discovered)
-            for job in discovered:
-                self.apply_query_filter(result, job, queries)
+            result.merge_from(page_result)
+            context.maybe_checkpoint(result, force=True)
             page_progress.advance()
         page_progress.finish()
         if self._filter_snapshots:
@@ -89,7 +88,19 @@ class CustomCareerPagesSource(BaseJobSource):
         page: CustomCareerPageConfig,
         context: SourceContext,
         queries: list[SearchQuery],
-    ) -> list[JobListing]:
+        result: SourceRunResult,
+    ) -> None:
+        seen_urls: set[str] = {job.source_url for job in result.discovered_jobs}
+
+        def record_job(job: JobListing) -> None:
+            if job.source_url in seen_urls:
+                return
+            seen_urls.add(job.source_url)
+            result.raw_jobs += 1
+            result.discovered_jobs.append(job)
+            self.apply_query_filter(result, job, queries)
+            context.maybe_checkpoint(result)
+
         candidate_urls = self._collect_candidate_urls(page, context)
         LOGGER.info(
             'custom career page %s: static discovery produced %s candidate urls',
@@ -102,14 +113,13 @@ class CustomCareerPagesSource(BaseJobSource):
                 page.name,
                 candidate_urls[:3],
             )
-        jobs = self._build_jobs_from_candidate_urls(candidate_urls, page, context)
+        jobs = self._build_jobs_from_candidate_urls(candidate_urls, page, context, on_job=record_job)
         LOGGER.info(
             'custom career page %s: static candidate parsing produced %s jobs',
             page.name,
             len(jobs),
         )
 
-        merged_jobs = list(jobs)
         if page.render_javascript and not jobs:
             LOGGER.info(
                 'custom career page %s: retrying with rendered DOM fallback using selector %s',
@@ -128,13 +138,12 @@ class CustomCareerPagesSource(BaseJobSource):
                     page.name,
                     rendered_urls[:5],
                 )
-            rendered_jobs = self._build_jobs_from_candidate_urls(rendered_urls, page, context)
+            rendered_jobs = self._build_jobs_from_candidate_urls(rendered_urls, page, context, on_job=record_job)
             LOGGER.info(
                 'custom career page %s: rendered candidate parsing produced %s jobs',
                 page.name,
                 len(rendered_jobs),
             )
-            merged_jobs = self._merge_jobs(merged_jobs, rendered_jobs)
 
         if page.render_javascript and page.apply_site_filters:
             filtered_urls = self._collect_site_filtered_candidate_urls(page, context, queries)
@@ -154,6 +163,7 @@ class CustomCareerPagesSource(BaseJobSource):
                 page,
                 context,
                 extra_raw_payload={"discovery_method": "site_filter"},
+                on_job=record_job,
             )
             self._site_filter_jobs = self._merge_jobs(self._site_filter_jobs, filtered_jobs)
             LOGGER.info(
@@ -161,9 +171,6 @@ class CustomCareerPagesSource(BaseJobSource):
                 page.name,
                 len(filtered_jobs),
             )
-            merged_jobs = self._merge_jobs(merged_jobs, filtered_jobs)
-
-        return merged_jobs
 
     def _build_jobs_from_candidate_urls(
         self,
@@ -171,6 +178,7 @@ class CustomCareerPagesSource(BaseJobSource):
         page: CustomCareerPageConfig,
         context: SourceContext,
         extra_raw_payload: dict | None = None,
+        on_job: Callable[[JobListing], None] | None = None,
     ) -> list[JobListing]:
         jobs: list[JobListing] = []
         ordered_urls: list[str] = []
@@ -203,6 +211,8 @@ class CustomCareerPagesSource(BaseJobSource):
                 job.raw_payload.update(extra_raw_payload)
             if self._looks_like_job(job, html):
                 jobs.append(job)
+                if on_job is not None:
+                    on_job(job)
             progress.advance()
         progress.finish()
         return jobs

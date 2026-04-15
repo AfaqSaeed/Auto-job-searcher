@@ -97,6 +97,7 @@ class JobSearcherPipeline:
         active_queries = queries or self.load_queries()
         effective_config = self._config_with_discovered_boards()
         context = SourceContext(config=effective_config, cache=self.cache)
+        context.checkpoint_callback = self._write_search_checkpoint
         jobs: list[JobListing] = []
         self.last_source_runs = []
         sources = build_enabled_sources(effective_config, self.project_root)
@@ -116,14 +117,12 @@ class JobSearcherPipeline:
                 self.last_source_runs.append(run)
                 self.logger.debug(run.summary())
                 jobs.extend(run.jobs)
+                self._write_search_artifacts()
                 source_progress.advance()
             source_progress.finish()
         deduped = self._dedupe_jobs(jobs)
-        write_json_output([job.model_dump(mode='json') for job in deduped], self.artifacts.discovered_jobs_json)
-        self._write_filtered_jobs_debug()
-        self._write_custom_career_pages_debug()
-        self._write_custom_career_page_filters_debug()
-        self._write_site_filtered_jobs_artifacts()
+        self._write_search_artifacts()
+        self._clear_search_checkpoint_artifacts()
         return deduped
 
     def load_jobs(self) -> list[JobListing]:
@@ -237,35 +236,109 @@ class JobSearcherPipeline:
         self.artifacts.profile_keywords_md.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
 
     def _write_filtered_jobs_debug(self) -> None:
-        payload = [run.filtered_debug_payload() for run in self.last_source_runs if run.filtered_out_jobs]
-        write_json_output(payload, self.artifacts.filtered_jobs_debug_json)
+        self._write_filtered_jobs_debug_to_path(self.last_source_runs, self.artifacts.filtered_jobs_debug_json)
 
     def _write_custom_career_pages_debug(self) -> None:
-        payload = [
-            run.discovered_debug_payload()
-            for run in self.last_source_runs
-            if run.source_name == 'custom_career_pages' and run.discovered_jobs
-        ]
-        write_json_output(payload, self.artifacts.custom_career_pages_debug_json)
+        self._write_custom_career_pages_debug_to_path(
+            self.last_source_runs,
+            self.artifacts.custom_career_pages_debug_json,
+        )
 
     def _write_custom_career_page_filters_debug(self) -> None:
+        self._write_custom_career_page_filters_debug_to_path(
+            self.last_source_runs,
+            self.artifacts.custom_career_page_filters_json,
+        )
+
+    def _write_site_filtered_jobs_artifacts(self) -> None:
+        self._write_site_filtered_jobs_artifacts_to_paths(
+            self.last_source_runs,
+            self.artifacts.site_filtered_jobs_json,
+            self.artifacts.site_filtered_jobs_md,
+        )
+
+    def _write_search_checkpoint(self, current_run: SourceRunResult) -> None:
+        self._write_search_artifacts(current_run=current_run, partial=True)
+
+    def _write_search_artifacts(self, current_run: SourceRunResult | None = None, partial: bool = False) -> None:
+        runs = list(self.last_source_runs)
+        if current_run is not None:
+            runs.append(current_run)
+
+        discovered_path = self.artifacts.discovered_jobs_partial_json if partial else self.artifacts.discovered_jobs_json
+        filtered_path = (
+            self.artifacts.filtered_jobs_debug_partial_json if partial else self.artifacts.filtered_jobs_debug_json
+        )
+        custom_debug_path = (
+            self.artifacts.custom_career_pages_debug_partial_json
+            if partial
+            else self.artifacts.custom_career_pages_debug_json
+        )
+        filter_path = (
+            self.artifacts.custom_career_page_filters_partial_json
+            if partial
+            else self.artifacts.custom_career_page_filters_json
+        )
+        site_filtered_json = (
+            self.artifacts.site_filtered_jobs_partial_json if partial else self.artifacts.site_filtered_jobs_json
+        )
+
+        deduped = self._dedupe_jobs([job for run in runs for job in run.jobs])
+        write_json_output([job.model_dump(mode='json') for job in deduped], discovered_path)
+        self._write_filtered_jobs_debug_to_path(runs, filtered_path)
+        self._write_custom_career_pages_debug_to_path(runs, custom_debug_path)
+        self._write_custom_career_page_filters_debug_to_path(runs, filter_path)
+        self._write_site_filtered_jobs_artifacts_to_paths(runs, site_filtered_json, self.artifacts.site_filtered_jobs_md)
+
+    def _clear_search_checkpoint_artifacts(self) -> None:
+        for path in [
+            self.artifacts.discovered_jobs_partial_json,
+            self.artifacts.filtered_jobs_debug_partial_json,
+            self.artifacts.custom_career_pages_debug_partial_json,
+            self.artifacts.custom_career_page_filters_partial_json,
+            self.artifacts.site_filtered_jobs_partial_json,
+        ]:
+            if path.exists():
+                path.unlink()
+
+    @staticmethod
+    def _write_filtered_jobs_debug_to_path(runs: list[SourceRunResult], path: Path) -> None:
+        payload = [run.filtered_debug_payload() for run in runs if run.filtered_out_jobs]
+        write_json_output(payload, path)
+
+    @staticmethod
+    def _write_custom_career_pages_debug_to_path(runs: list[SourceRunResult], path: Path) -> None:
+        payload = [
+            run.discovered_debug_payload()
+            for run in runs
+            if run.source_name == 'custom_career_pages' and run.discovered_jobs
+        ]
+        write_json_output(payload, path)
+
+    @staticmethod
+    def _write_custom_career_page_filters_debug_to_path(runs: list[SourceRunResult], path: Path) -> None:
         payload = [
             {
                 'source_name': run.source_name,
                 'filter_snapshots': run.debug_data.get('filter_snapshots', []),
             }
-            for run in self.last_source_runs
+            for run in runs
             if run.source_name == 'custom_career_pages' and run.debug_data.get('filter_snapshots')
         ]
-        write_json_output(payload, self.artifacts.custom_career_page_filters_json)
+        write_json_output(payload, path)
 
-    def _write_site_filtered_jobs_artifacts(self) -> None:
+    @staticmethod
+    def _write_site_filtered_jobs_artifacts_to_paths(
+        runs: list[SourceRunResult],
+        json_path: Path,
+        markdown_path: Path,
+    ) -> None:
         jobs_payload: list[dict] = []
-        for run in self.last_source_runs:
+        for run in runs:
             if run.source_name != 'custom_career_pages':
                 continue
             jobs_payload.extend(run.debug_data.get('site_filter_jobs', []))
-        write_json_output(jobs_payload, self.artifacts.site_filtered_jobs_json)
+        write_json_output(jobs_payload, json_path)
 
         lines = ['# Site-Filtered Job Matches', '']
         if not jobs_payload:
@@ -286,7 +359,7 @@ class JobSearcherPipeline:
                 if discovery_method:
                     lines.append(f'- Discovery method: {discovery_method}')
                 lines.append('')
-        self.artifacts.site_filtered_jobs_md.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
+        markdown_path.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
 
     def _build_report_source_stats(self) -> list[SearchSourceStats]:
         if self.last_source_runs:
