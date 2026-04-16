@@ -161,6 +161,7 @@ class JobScore(BaseModel):
     mismatch_penalty: float = 0.0
     rules_based_score: float = 0.0
     embedding_similarity_score: float = 0.0
+    llm_latency_seconds: float = 0.0
     llm_assessment: LLMAssessment = Field(default_factory=LLMAssessment)
     overall_score: float = 0.0
     why_match: str = ""
