@@ -251,3 +251,38 @@ def test_derive_filter_plans_uses_country_company_and_search_terms() -> None:
     assert plans[0]['country_region'] == 'Germany'
     assert plans[0]['company'] == 'Fraunhofer'
     assert any(plan.get('search_text') == 'Computer Vision Engineer' for plan in plans)
+
+
+def test_derive_filter_plans_respects_max_site_filter_plans() -> None:
+    page_config = CustomCareerPageConfig(
+        name='Fraunhofer Jobs',
+        company='Fraunhofer',
+        url='https://jobs.fraunhofer.de/search/?locale=en_US',
+        include_url_patterns=['/job/'],
+        render_javascript=True,
+        apply_site_filters=True,
+        max_site_filter_plans=2,
+    )
+    config = AppConfig()
+    config.search.target_countries = ['Germany']
+    config.search.job_titles = ['Computer Vision Engineer', 'Perception Engineer', 'Robotics Engineer']
+    config.search.include_keywords = ['machine learning', 'computer vision', 'slam']
+    fields = [
+        {
+            'name': 'query',
+            'label': 'Search by Keyword',
+            'type': 'search',
+            'semantic_kind': 'search_text',
+            'selector': '#query',
+            'options': [],
+        },
+    ]
+
+    plans = CustomCareerPagesSource._derive_filter_plans(
+        fields,
+        page_config,
+        config,
+        [SearchQuery(text='computer vision engineer germany')],
+    )
+
+    assert len(plans) == 2

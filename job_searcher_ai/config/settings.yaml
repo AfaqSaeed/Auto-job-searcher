@@ -99,6 +99,10 @@ sources:
     rendered_wait_selector: a.m-results__anchor
     max_pages: 200
     apply_site_filters: true
+    candidate_parse_workers: 4
+    max_site_filter_plans: 2
+    max_site_filter_candidate_urls: 20
+    discovery_strategy: site_filters_only
   - name: Fraunhofer Jobs EN
     company: Fraunhofer
     url: https://jobs.fraunhofer.de/search/?locale=en_US
@@ -109,6 +113,10 @@ sources:
     rendered_link_selector: a[href*="/job/"]
     rendered_wait_selector: a[href*="/job/"]
     max_pages: 200
+    candidate_parse_workers: 8
+    max_site_filter_plans: 3
+    max_site_filter_candidate_urls: 40
+    discovery_strategy: site_filters_only
   greenhouse_boards:
   - wayve
   - navvis

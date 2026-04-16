@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from typing import TYPE_CHECKING, Callable
 from urllib.parse import urlparse
@@ -101,26 +102,28 @@ class CustomCareerPagesSource(BaseJobSource):
             self.apply_query_filter(result, job, queries)
             context.maybe_checkpoint(result)
 
-        candidate_urls = self._collect_candidate_urls(page, context)
-        LOGGER.info(
-            'custom career page %s: static discovery produced %s candidate urls',
-            page.name,
-            len(candidate_urls),
-        )
-        if candidate_urls:
+        jobs: list[JobListing] = []
+        if page.discovery_strategy != 'site_filters_only':
+            candidate_urls = self._collect_candidate_urls(page, context)
             LOGGER.info(
-                'custom career page %s: static candidate sample: %s',
+                'custom career page %s: static discovery produced %s candidate urls',
                 page.name,
-                candidate_urls[:3],
+                len(candidate_urls),
             )
-        jobs = self._build_jobs_from_candidate_urls(candidate_urls, page, context, on_job=record_job)
-        LOGGER.info(
-            'custom career page %s: static candidate parsing produced %s jobs',
-            page.name,
-            len(jobs),
-        )
+            if candidate_urls:
+                LOGGER.info(
+                    'custom career page %s: static candidate sample: %s',
+                    page.name,
+                    candidate_urls[:3],
+                )
+            jobs = self._build_jobs_from_candidate_urls(candidate_urls, page, context, on_job=record_job)
+            LOGGER.info(
+                'custom career page %s: static candidate parsing produced %s jobs',
+                page.name,
+                len(jobs),
+            )
 
-        if page.render_javascript and not jobs:
+        if page.render_javascript and not jobs and page.discovery_strategy != 'site_filters_only':
             LOGGER.info(
                 'custom career page %s: retrying with rendered DOM fallback using selector %s',
                 page.name,
@@ -189,17 +192,21 @@ class CustomCareerPagesSource(BaseJobSource):
             seen_urls.add(url)
             ordered_urls.append(url)
 
+        if not ordered_urls:
+            return jobs
+
         progress = ProgressLogger(
             LOGGER,
             f"Custom page {page.name} candidate pages",
             len(ordered_urls),
             min_interval_seconds=3.0,
         )
-        for url in ordered_urls:
+        workers = max(1, page.candidate_parse_workers)
+
+        def parse_candidate(url: str) -> JobListing | None:
             html = context.get_text(url)
             if not html:
-                progress.advance()
-                continue
+                return None
             job = parse_static_job_page(url, html, company=page.company or page.name, source=self.name)
             job.raw_payload.update(
                 {
@@ -209,11 +216,19 @@ class CustomCareerPagesSource(BaseJobSource):
             )
             if extra_raw_payload:
                 job.raw_payload.update(extra_raw_payload)
-            if self._looks_like_job(job, html):
-                jobs.append(job)
-                if on_job is not None:
-                    on_job(job)
-            progress.advance()
+            if not self._looks_like_job(job, html):
+                return None
+            return job
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(parse_candidate, url): url for url in ordered_urls}
+            for future in as_completed(futures):
+                job = future.result()
+                if job is not None:
+                    jobs.append(job)
+                    if on_job is not None:
+                        on_job(job)
+                progress.advance()
         progress.finish()
         return jobs
 
@@ -474,12 +489,22 @@ class CustomCareerPagesSource(BaseJobSource):
                         )
                         candidates.extend(matching_links)
                         plan_progress.advance()
+                        if len(candidates) >= page.max_site_filter_candidate_urls:
+                            break
                     plan_progress.finish()
                     render_progress.advance()
+                    if len(candidates) >= page.max_site_filter_candidate_urls:
+                        LOGGER.info(
+                            'custom career page %s: stopping site-filter collection at configured limit of %s urls',
+                            page.name,
+                            page.max_site_filter_candidate_urls,
+                        )
+                        break
                 render_progress.finish()
             finally:
                 browser.close()
-        return self._dedupe_preserve_order(candidates)
+        deduped = self._dedupe_preserve_order(candidates)
+        return deduped[: page.max_site_filter_candidate_urls]
 
     def _capture_filter_snapshot(self, page: CustomCareerPageConfig, url: str, html: str) -> None:
         fields = self._extract_filter_fields(html)
@@ -648,7 +673,7 @@ class CustomCareerPagesSource(BaseJobSource):
                 continue
             seen.add(key)
             deduped.append(plan)
-        return deduped[:8]
+        return deduped[: page.max_site_filter_plans]
 
     @staticmethod
     def _search_terms_for_site_filters(config, queries: list[SearchQuery]) -> list[str]:

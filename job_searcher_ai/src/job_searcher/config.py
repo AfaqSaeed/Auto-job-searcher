@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -97,6 +98,10 @@ class CustomCareerPageConfig(BaseModel):
     rendered_link_selector: str | None = None
     rendered_wait_selector: str | None = None
     sitemap_paths: list[str] = Field(default_factory=lambda: ["/sitemap.xml", "/sitemap_index.xml"])
+    candidate_parse_workers: int = 6
+    max_site_filter_plans: int = 3
+    max_site_filter_candidate_urls: int = 60
+    discovery_strategy: Literal["auto", "site_filters_only", "static_only"] = "auto"
 
 
 class SourcesSettings(BaseModel):
