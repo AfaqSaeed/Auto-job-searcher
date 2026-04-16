@@ -1,13 +1,19 @@
-﻿"""Fuse rules, embeddings, and LLM reasoning into ranked jobs."""
+"""Fuse rules, embeddings, and LLM reasoning into ranked jobs."""
 
 from __future__ import annotations
 
+import logging
+
 from job_searcher.config import AppConfig
 from job_searcher.llm.ollama_client import OllamaClient
+from job_searcher.logging_utils import ProgressLogger
 from job_searcher.ranking.embeddings import compute_profile_job_similarity
 from job_searcher.ranking.llm_reasoning import assess_job_with_llm
 from job_searcher.ranking.rules import score_job_rules
 from job_searcher.schemas import Disposition, JobListing, RankedJob, UserProfile
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 LLM_LABEL_SCORES = {
@@ -27,6 +33,7 @@ def rank_jobs(
     """Rank jobs by fusing symbolic, embedding, and LLM signals."""
 
     ranked: list[RankedJob] = []
+    progress = ProgressLogger(LOGGER, "Rank jobs", len(jobs), min_interval_seconds=3.0)
     for job in jobs:
         score = score_job_rules(profile, job, config)
         embedding_score = compute_profile_job_similarity(profile, job, config) if config.embeddings.enabled else 0.0
@@ -41,6 +48,8 @@ def rank_jobs(
         score.recommended_cover_letter_angle = llm_assessment.recommended_cover_letter_angle or score.recommended_cover_letter_angle
         score.disposition = _final_disposition(score.overall_score, score.disposition)
         ranked.append(RankedJob(listing=job, score=score))
+        progress.advance()
+    progress.finish()
     return sorted(ranked, key=lambda item: item.score.overall_score, reverse=True)
 
 
