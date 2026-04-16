@@ -124,8 +124,11 @@ class PipelineArtifacts(BaseModel):
     site_filtered_jobs_partial_json: Path
     site_filtered_jobs_md: Path
     jobs_ranked_json: Path
+    jobs_ranked_partial_json: Path
     jobs_ranked_csv: Path
+    jobs_ranked_partial_csv: Path
     top_matches_md: Path
+    top_matches_partial_md: Path
     search_report_md: Path
     search_report_json: Path
     pipeline_state_json: Path
@@ -154,8 +157,11 @@ class PipelineArtifacts(BaseModel):
             site_filtered_jobs_partial_json=output_path / "site_filtered_jobs.partial.json",
             site_filtered_jobs_md=output_path / "site_filtered_jobs.md",
             jobs_ranked_json=output_path / "jobs_ranked.json",
+            jobs_ranked_partial_json=output_path / "jobs_ranked.partial.json",
             jobs_ranked_csv=output_path / "jobs_ranked.csv",
+            jobs_ranked_partial_csv=output_path / "jobs_ranked.partial.csv",
             top_matches_md=output_path / "top_matches.md",
+            top_matches_partial_md=output_path / "top_matches.partial.md",
             search_report_md=output_path / "search_report.md",
             search_report_json=output_path / "search_report.json",
             pipeline_state_json=output_path / "pipeline_state.json",

@@ -23,6 +23,9 @@ def test_pipeline_artifacts_include_filtered_jobs_debug() -> None:
     assert artifacts.site_filtered_jobs_partial_json.name == 'site_filtered_jobs.partial.json'
     assert artifacts.site_filtered_jobs_md.name == 'site_filtered_jobs.md'
     assert artifacts.discovered_jobs_partial_json.name == 'discovered_jobs.partial.json'
+    assert artifacts.jobs_ranked_partial_json.name == 'jobs_ranked.partial.json'
+    assert artifacts.jobs_ranked_partial_csv.name == 'jobs_ranked.partial.csv'
+    assert artifacts.top_matches_partial_md.name == 'top_matches.partial.md'
     assert artifacts.pipeline_state_json.name == 'pipeline_state.json'
 
 

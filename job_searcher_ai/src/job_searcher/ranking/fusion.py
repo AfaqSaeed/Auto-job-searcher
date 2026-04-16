@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from typing import Callable
 
 from job_searcher.config import AppConfig
 from job_searcher.llm.ollama_client import OllamaClient
@@ -29,11 +31,14 @@ def rank_jobs(
     jobs: list[JobListing],
     config: AppConfig,
     client: OllamaClient | None = None,
+    checkpoint_callback: Callable[[list[RankedJob]], None] | None = None,
+    checkpoint_interval_seconds: float = 30.0,
 ) -> list[RankedJob]:
     """Rank jobs by fusing symbolic, embedding, and LLM signals."""
 
     ranked: list[RankedJob] = []
     progress = ProgressLogger(LOGGER, "Rank jobs", len(jobs), min_interval_seconds=3.0)
+    last_checkpoint_at = 0.0
     for job in jobs:
         score = score_job_rules(profile, job, config)
         embedding_score = compute_profile_job_similarity(profile, job, config) if config.embeddings.enabled else 0.0
@@ -48,8 +53,15 @@ def rank_jobs(
         score.recommended_cover_letter_angle = llm_assessment.recommended_cover_letter_angle or score.recommended_cover_letter_angle
         score.disposition = _final_disposition(score.overall_score, score.disposition)
         ranked.append(RankedJob(listing=job, score=score))
+        if checkpoint_callback is not None:
+            now = time.monotonic()
+            if last_checkpoint_at == 0.0 or (now - last_checkpoint_at) >= checkpoint_interval_seconds:
+                checkpoint_callback(list(ranked))
+                last_checkpoint_at = now
         progress.advance()
     progress.finish()
+    if checkpoint_callback is not None:
+        checkpoint_callback(list(ranked))
     return sorted(ranked, key=lambda item: item.score.overall_score, reverse=True)
 
 

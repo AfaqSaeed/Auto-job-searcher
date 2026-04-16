@@ -175,13 +175,15 @@ class JobSearcherPipeline:
     def rank_jobs(self, profile: UserProfile | None = None, jobs: list[JobListing] | None = None) -> list[RankedJob]:
         active_profile = profile or self.load_profile()
         active_jobs = jobs or self.load_jobs()
-        ranked_jobs = fuse_ranked_jobs(active_profile, active_jobs, self.config, client=self.llm_client)
-        write_json_output([item.model_dump(mode='json') for item in ranked_jobs], self.artifacts.jobs_ranked_json)
-        export_ranked_jobs_csv(ranked_jobs, self.artifacts.jobs_ranked_csv)
-        self.artifacts.top_matches_md.write_text(
-            build_top_matches_markdown(ranked_jobs, self.config.outputs.top_n_markdown),
-            encoding='utf-8',
+        ranked_jobs = fuse_ranked_jobs(
+            active_profile,
+            active_jobs,
+            self.config,
+            client=self.llm_client,
+            checkpoint_callback=self._write_ranked_jobs_checkpoint,
         )
+        self._write_ranked_job_artifacts(ranked_jobs)
+        self._clear_ranked_job_checkpoint_artifacts()
         self._mark_step_completed(
             'rank_jobs',
             self._profile_dependent_fingerprint(),
@@ -464,6 +466,30 @@ class JobSearcherPipeline:
             self.artifacts.site_filtered_jobs_json,
             self.artifacts.site_filtered_jobs_md,
         )
+
+    def _write_ranked_jobs_checkpoint(self, ranked_jobs: list[RankedJob]) -> None:
+        self._write_ranked_job_artifacts(ranked_jobs, partial=True)
+
+    def _write_ranked_job_artifacts(self, ranked_jobs: list[RankedJob], partial: bool = False) -> None:
+        jobs_json_path = self.artifacts.jobs_ranked_partial_json if partial else self.artifacts.jobs_ranked_json
+        jobs_csv_path = self.artifacts.jobs_ranked_partial_csv if partial else self.artifacts.jobs_ranked_csv
+        top_matches_path = self.artifacts.top_matches_partial_md if partial else self.artifacts.top_matches_md
+
+        write_json_output([item.model_dump(mode='json') for item in ranked_jobs], jobs_json_path)
+        export_ranked_jobs_csv(ranked_jobs, jobs_csv_path)
+        top_matches_path.write_text(
+            build_top_matches_markdown(ranked_jobs, self.config.outputs.top_n_markdown),
+            encoding='utf-8',
+        )
+
+    def _clear_ranked_job_checkpoint_artifacts(self) -> None:
+        for path in [
+            self.artifacts.jobs_ranked_partial_json,
+            self.artifacts.jobs_ranked_partial_csv,
+            self.artifacts.top_matches_partial_md,
+        ]:
+            if path.exists():
+                path.unlink()
 
     def _write_search_checkpoint(self, current_run: SourceRunResult) -> None:
         self._write_search_artifacts(current_run=current_run, partial=True)
