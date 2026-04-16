@@ -48,6 +48,12 @@ class EmbeddingSettings(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
 
+class RankingSettings(BaseModel):
+    llm_enabled: bool = True
+    llm_top_n: int = 20
+    llm_min_rules_score: float = 55.0
+
+
 class ScrapingSettings(BaseModel):
     request_timeout_seconds: int = 20
     rate_limit_seconds: float = 1.0
@@ -114,6 +120,7 @@ class AppConfig(BaseModel):
     criteria: PreferredCriteria = Field(default_factory=PreferredCriteria)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     embeddings: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    ranking: RankingSettings = Field(default_factory=RankingSettings)
     scraping: ScrapingSettings = Field(default_factory=ScrapingSettings)
     sources: SourcesSettings = Field(default_factory=SourcesSettings)
     outputs: OutputSettings = Field(default_factory=OutputSettings)

@@ -68,6 +68,10 @@ ollama:
 embeddings:
   enabled: false
   model_name: BAAI/bge-small-en-v1.5
+ranking:
+  llm_enabled: true
+  llm_top_n: 20
+  llm_min_rules_score: 55.0
 scraping:
   request_timeout_seconds: 20
   rate_limit_seconds: 1.0
