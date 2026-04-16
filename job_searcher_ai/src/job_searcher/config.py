@@ -52,6 +52,7 @@ class RankingSettings(BaseModel):
     llm_enabled: bool = True
     llm_top_n: int = 20
     llm_min_rules_score: float = 55.0
+    checkpoint_interval_seconds: float = 30.0
 
 
 class ScrapingSettings(BaseModel):

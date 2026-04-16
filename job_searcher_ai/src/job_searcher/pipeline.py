@@ -181,6 +181,7 @@ class JobSearcherPipeline:
             self.config,
             client=self.llm_client,
             checkpoint_callback=self._write_ranked_jobs_checkpoint,
+            checkpoint_interval_seconds=self.config.ranking.checkpoint_interval_seconds,
         )
         self._write_ranked_job_artifacts(ranked_jobs)
         self._clear_ranked_job_checkpoint_artifacts()
