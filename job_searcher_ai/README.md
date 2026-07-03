@@ -16,6 +16,45 @@ The v1 design is intentionally local-first:
 
 The system separates profile ingestion, source discovery, matching, local explanation, and reviewable exports so each stage can be inspected independently.
 
+Explainable matching follows this workflow:
+
+1. Ingest a candidate profile into the existing `UserProfile` model.
+2. Parse one selected role into the existing `JobListing` model.
+3. Extract concise job requirements, retrieve profile evidence for each requirement, and assess direct or transferable support.
+4. Optionally check proposed application claims against the same evidence.
+5. Export JSON and Markdown reports that remain reviewable without any remote service.
+
+Install all local development, embedding, and UI extras:
+
+```powershell
+pip install -e .[dev,embeddings,ui]
+```
+
+Run an explainable match from the CLI, replacing the job path with the selected role file:
+
+```powershell
+C:\Users\afaqs\anaconda3\python.exe -m job_searcher explain-match `
+  --profile data/profile_master.md `
+  --job examples/loka_ai_job.txt
+```
+
+The repository also includes fictional sample inputs:
+
+```powershell
+C:\Users\afaqs\anaconda3\python.exe -m job_searcher explain-match `
+  --profile examples/sample_candidate_profile.md `
+  --job examples/sample_job_description.txt `
+  --claims examples/sample_claims.txt
+```
+
+Launch the Streamlit interface:
+
+```powershell
+streamlit run app.py
+```
+
+The output includes an overall fit score, an advisory recommendation, strengths, gaps, requirement-level assessments, evidence excerpts, and unsupported application-claim checks.
+
 ## Features
 
 - Profile ingestion from Markdown and text files
@@ -140,6 +179,8 @@ The pipeline writes:
 - `outputs/jobs_ranked.csv`
 - `outputs/top_matches.md`
 - `outputs/search_report.md`
+- `outputs/explainable_match_report.json`
+- `outputs/explainable_match_report.md`
 
 Each ranked result includes:
 
@@ -150,6 +191,17 @@ Each ranked result includes:
 - Resume emphasis angle
 - Cover-letter angle
 - `apply`, `maybe`, or `skip` label
+
+## Explainable Matching Outputs
+
+The explainable match report is candidate-to-role, not a bulk ranking. It includes:
+
+- Overall fit score from requirement-level statuses, separate from the existing ranking score
+- Requirement-level evidence with source labels and similarity scores
+- Direct versus transferable experience explanations
+- Missing or uncertain requirements for human review
+- Unsupported application claim detection
+- Safer wording suggestions when a claim is exaggerated or not directly supported
 
 ## Supported job sources
 

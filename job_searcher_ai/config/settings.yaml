@@ -73,6 +73,14 @@ ranking:
   llm_top_n: 20
   llm_min_rules_score: 55.0
   checkpoint_interval_seconds: 30.0
+matching:
+  enabled: true
+  max_requirements: 15
+  evidence_top_k: 3
+  strong_threshold: 0.72
+  partial_threshold: 0.50
+  uncertain_threshold: 0.30
+  use_llm: true
 scraping:
   request_timeout_seconds: 20
   rate_limit_seconds: 1.0

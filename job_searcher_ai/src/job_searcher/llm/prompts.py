@@ -15,6 +15,27 @@ JOB_FIT_SYSTEM = (
     "Prefer concrete evidence from the profile and job description."
 )
 
+REQUIREMENT_EXTRACTION_SYSTEM = (
+    "You extract job requirements for an evidence-based match report. "
+    "Respond with compact JSON only. Use atomic, reviewable requirements. "
+    "Do not invent requirements. Avoid vague soft skills unless explicitly emphasized."
+)
+
+REQUIREMENT_MATCH_SYSTEM = (
+    "You assess one candidate requirement using only supplied evidence. "
+    "Respond with compact JSON only. Do not invent experience. "
+    "Distinguish direct from transferable experience. Avoid inflated confidence. "
+    "Do not infer years of experience unless explicitly present."
+)
+
+CLAIM_CHECK_SYSTEM = (
+    "You verify application claims using only supplied candidate evidence. "
+    "Respond with compact JSON only. Do not invent experience. "
+    "Flag unsupported or exaggerated claims and propose safer wording when needed. "
+    "Distinguish direct from transferable experience. Avoid inflated confidence. "
+    "Do not infer years of experience unless explicitly present."
+)
+
 
 def build_profile_summary_prompt(profile_text: str) -> str:
     return f"""
@@ -58,4 +79,56 @@ Description:
 {job.description[:3500]}
 
 Rules score: {rules_score}
+""".strip()
+
+
+def build_requirement_extraction_prompt(job: JobListing, max_requirements: int = 15) -> str:
+    return f"""
+Return JSON with key "requirements" containing up to {max_requirements} concise, atomic requirements.
+Prefer explicit required skills, preferred skills, responsibilities, and minimum qualifications.
+Exclude vague items unless the job explicitly emphasizes them.
+
+Job title: {job.title}
+Company: {job.company}
+Required skills: {", ".join(job.required_skills)}
+Preferred skills: {", ".join(job.preferred_skills)}
+Responsibilities: {", ".join(job.responsibilities)}
+Minimum qualifications: {", ".join(job.minimum_qualifications)}
+Domain signals: {", ".join(job.domain_signals)}
+Description:
+{job.description[:5000]}
+""".strip()
+
+
+def build_requirement_match_prompt(requirement: str, evidence: list[dict[str, object]]) -> str:
+    return f"""
+Return JSON with keys:
+- status: one of strong_match, partial_match, missing, uncertain
+- explanation: short conservative explanation
+- transferable_skills: list of skills or domains that transfer, empty if none
+- confidence: number from 0 to 1
+- selected_evidence_indices: zero-based list of supplied evidence indices used
+
+Requirement:
+{requirement}
+
+Evidence:
+{evidence}
+""".strip()
+
+
+def build_claim_check_prompt(claim: str, evidence: list[dict[str, object]]) -> str:
+    return f"""
+Return JSON with keys:
+- supported: true only when the claim is fully supported by the supplied evidence
+- explanation: short conservative explanation
+- safer_wording: null when supported, otherwise a safer alternative that preserves the core meaning
+- confidence: number from 0 to 1
+- selected_evidence_indices: zero-based list of supplied evidence indices used
+
+Claim:
+{claim}
+
+Evidence:
+{evidence}
 """.strip()
