@@ -56,6 +56,16 @@ class RankingSettings(BaseModel):
     checkpoint_interval_seconds: float = 30.0
 
 
+class MatchingSettings(BaseModel):
+    enabled: bool = True
+    max_requirements: int = Field(default=15, ge=1, le=50)
+    evidence_top_k: int = Field(default=3, ge=1, le=10)
+    strong_threshold: float = Field(default=0.72, ge=0.0, le=1.0)
+    partial_threshold: float = Field(default=0.50, ge=0.0, le=1.0)
+    uncertain_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
+    use_llm: bool = True
+
+
 class ScrapingSettings(BaseModel):
     request_timeout_seconds: int = 20
     rate_limit_seconds: float = 1.0
@@ -127,6 +137,7 @@ class AppConfig(BaseModel):
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     embeddings: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     ranking: RankingSettings = Field(default_factory=RankingSettings)
+    matching: MatchingSettings = Field(default_factory=MatchingSettings)
     scraping: ScrapingSettings = Field(default_factory=ScrapingSettings)
     sources: SourcesSettings = Field(default_factory=SourcesSettings)
     outputs: OutputSettings = Field(default_factory=OutputSettings)

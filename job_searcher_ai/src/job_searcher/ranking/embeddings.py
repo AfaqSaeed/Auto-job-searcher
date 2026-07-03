@@ -8,24 +8,42 @@ from job_searcher.config import AppConfig
 from job_searcher.schemas import JobListing, UserProfile
 from job_searcher.utils.text import jaccard_similarity, tokenise, unique_preserve_order
 
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError:  # pragma: no cover - optional dependency
-    SentenceTransformer = None
+_SENTENCE_TRANSFORMER_CLASS: object | None = None
+_SENTENCE_TRANSFORMER_CHECKED = False
+
+
+def _sentence_transformer_class() -> object | None:
+    """Lazy-load the optional sentence-transformers dependency."""
+
+    global _SENTENCE_TRANSFORMER_CLASS, _SENTENCE_TRANSFORMER_CHECKED
+    if _SENTENCE_TRANSFORMER_CHECKED:
+        return _SENTENCE_TRANSFORMER_CLASS
+    _SENTENCE_TRANSFORMER_CHECKED = True
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:  # pragma: no cover - optional dependency
+        _SENTENCE_TRANSFORMER_CLASS = None
+    else:
+        _SENTENCE_TRANSFORMER_CLASS = SentenceTransformer
+    return _SENTENCE_TRANSFORMER_CLASS
 
 
 @dataclass
 class EmbeddingBackend:
     model_name: str
     model: object | None = None
+    enabled: bool = True
 
     def load(self) -> None:
-        if SentenceTransformer is None or self.model is not None:
+        if not self.enabled or self.model is not None:
             return
-        self.model = SentenceTransformer(self.model_name)
+        sentence_transformer = _sentence_transformer_class()
+        if sentence_transformer is None:
+            return
+        self.model = sentence_transformer(self.model_name)
 
     def similarity(self, left: str, right: str) -> float:
-        if SentenceTransformer is None:
+        if not self.enabled:
             return lexical_similarity(left, right)
         self.load()
         if self.model is None:
@@ -62,6 +80,6 @@ def compute_profile_job_similarity(profile: UserProfile, job: JobListing, config
             + job.domain_signals
         )
     )
-    backend = EmbeddingBackend(config.embeddings.model_name)
+    backend = EmbeddingBackend(config.embeddings.model_name, enabled=config.embeddings.enabled)
     similarity = backend.similarity(profile_text, job_text)
     return round(max(0.0, min(1.0, similarity)) * 100.0, 2)

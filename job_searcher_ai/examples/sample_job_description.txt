@@ -1,0 +1,20 @@
+Title: Computer Vision Engineer
+Company: Example Automation
+Location: Berlin, Germany
+Description:
+We are looking for a Computer Vision Engineer to build reliable visual inspection systems for industrial automation.
+
+Responsibilities:
+- Develop Python and PyTorch pipelines for object detection and image classification.
+- Evaluate model performance and communicate failure modes to engineering teams.
+- Package inference workflows with Docker for repeatable deployment.
+
+Requirements:
+- Experience with computer vision, object detection, or image classification.
+- Strong Python engineering skills.
+- Familiarity with PyTorch or a similar deep learning framework.
+- Practical model evaluation experience.
+
+Preferred:
+- Experience deploying inference services.
+- Familiarity with robotics or industrial automation.

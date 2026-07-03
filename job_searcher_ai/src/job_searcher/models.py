@@ -131,6 +131,8 @@ class PipelineArtifacts(BaseModel):
     top_matches_partial_md: Path
     search_report_md: Path
     search_report_json: Path
+    explainable_match_report_json: Path
+    explainable_match_report_md: Path
     pipeline_state_json: Path
 
     @classmethod
@@ -164,5 +166,7 @@ class PipelineArtifacts(BaseModel):
             top_matches_partial_md=output_path / "top_matches.partial.md",
             search_report_md=output_path / "search_report.md",
             search_report_json=output_path / "search_report.json",
+            explainable_match_report_json=output_path / "explainable_match_report.json",
+            explainable_match_report_md=output_path / "explainable_match_report.md",
             pipeline_state_json=output_path / "pipeline_state.json",
         )
