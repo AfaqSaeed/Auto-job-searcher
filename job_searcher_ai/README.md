@@ -10,6 +10,12 @@ The v1 design is intentionally local-first:
 - Avoids auto-apply behavior.
 - Respects public-source boundaries and does not attempt login bypass or anti-bot evasion.
 
+## Architecture
+
+![Explainable talent matching architecture](docs/assets/explainable_talent_matching_architecture.png)
+
+The system separates profile ingestion, source discovery, matching, local explanation, and reviewable exports so each stage can be inspected independently.
+
 ## Features
 
 - Profile ingestion from Markdown and text files
