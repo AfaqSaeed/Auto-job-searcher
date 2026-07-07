@@ -35,7 +35,7 @@ Run an explainable match from the CLI, replacing the job path with the selected 
 ```powershell
 C:\Users\afaqs\anaconda3\python.exe -m job_searcher explain-match `
   --profile data/profile_master.md `
-  --job examples/loka_ai_job.txt
+  --job examples/ai_job.txt
 ```
 
 The repository also includes fictional sample inputs:
